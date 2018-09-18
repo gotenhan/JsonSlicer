@@ -20,7 +20,7 @@ namespace JsonSlicerTests
             var pipe = new Pipe();
             var to = new TestObj()
             {
-                String = new string('ক', 4096),
+                String = new string('ক', 15),
                 Decimal = decimal.MaxValue,
                 Double = double.MaxValue,
                 Nested = new Nested
@@ -31,7 +31,11 @@ namespace JsonSlicerTests
                 },
                 ArrayList = new ArrayList() { 1, "bla", new SmallNestedType { SmallNested = 1 } }
             };
-            await default(JsonWriter).WriteAsync(to, pipe.Writer);
+            for (int i = 0; i < 1000; i++)
+            {
+                await TypeSerializer.JsonWriter.WriteAsync(to, pipe.Writer);
+            }
+
             pipe.Writer.Complete();
             ReadResult r;
             StringBuilder json = new StringBuilder();

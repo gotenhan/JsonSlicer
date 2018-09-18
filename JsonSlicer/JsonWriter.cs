@@ -1,32 +1,73 @@
 ﻿using System;
 using System.Buffers.Text;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO.Pipelines;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace JsonSlicer
 {
-    public struct JsonWriter
+    public interface IValueExtractorFactory<T>
     {
-        [ThreadStatic]
-        private static readonly Encoding UTF8 = Encoding.UTF8;
+        Func<T, V> ValueExtractor<V>();
+    }
 
-        [ThreadStatic]
-        private static readonly Encoder UTF8Enc = Encoding.UTF8.GetEncoder();
+    public struct PropertyValueExtractorFactory<T> : IValueExtractorFactory<T>
+    {
+        private PropertyInfo _pi;
 
-        public async Task WriteAsync<T>(T t, PipeWriter writer)
+        public PropertyValueExtractorFactory(PropertyInfo pi)
         {
-            await WriteAsync(Token.BeginObject, writer);
-            await WriteAsync(Token.CarriageReturn, writer);
-            await WriteAsync(Token.LineFeed, writer);
+            _pi = pi;
+        }
 
-            var properties = t.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
-            for (int i = 0; i < properties.Length; i++)
+        public Func<T, V> ValueExtractor<V>()
+        {
+            var paramExpression = Expression.Parameter(typeof(T), "obj");
+            var propertyExpressino = Expression.Property(paramExpression, _pi);
+            var lambda = Expression.Lambda<Func<T, V>>(propertyExpressino, paramExpression);
+            return lambda.Compile();
+        }
+    }
+
+    public struct IdendityValueExtractor<T> : IValueExtractorFactory<T>
+    {
+        public Func<T, V> ValueExtractor<V>()
+        {
+            return t => (V) (object) t;
+        }
+    }
+
+    public struct TypeSerializer
+    {
+        private Type _underlyingType;
+        private Func<object, PipeWriter, Task> _serializer;
+        private static readonly Type[] KnownTypes = new[] {typeof(string)};
+
+
+        public TypeSerializer(Type t, Func<object, PipeWriter, Task> serializer)
+        {
+            _underlyingType = t;
+            _serializer = serializer;
+        }
+
+        public Task WriteAsync<T>(T t, PipeWriter writer)
+        {
+            return _serializer(t, writer);
+        }
+
+        public static TypeSerializer Build<T>()
+        {
+            var actions = new List<Func<T, PipeWriter, Task>>();
+            var properties = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            for (var i = 0; i < properties.Length; i++)
             {
                 var prop = properties[i];
                 if (prop.GetIndexParameters().Length > 0)
@@ -34,239 +75,421 @@ namespace JsonSlicer
                     continue;
                 }
 
-                var propName = prop.Name;
-                await WriteAsync(Token.StringDelimiter, writer);
-                await WriteAsync(propName, writer);
-                await WriteAsync(Token.StringDelimiter, writer);
-                await WriteAsync(Token.NameSeparator, writer);
-                await WriteAsync(Token.Space, writer);
+                var pt = prop.PropertyType;
+                var valueExtractor = new PropertyValueExtractorFactory<T>(prop);
+                var action = GetObjectWriter<T, PropertyValueExtractorFactory<T>>(pt, valueExtractor);
 
-                var propType = prop.PropertyType;
-                var propValue = prop.GetValue(t);
+                var propName = new Property(prop.Name);
 
-                await WriteValue(writer, propValue, propType);
-
-                if (i != properties.Length - 1)
+                actions.Add(async (t, writer) =>
                 {
-                    await WriteAsync(Token.ValueSeparator, writer);
-                    await WriteAsync(Token.CarriageReturn, writer);
-                    await WriteAsync(Token.LineFeed, writer);
+                    await JsonWriter.WriteAsync(propName, writer);
+                    await JsonWriter.WriteAsync(Token.NameSeparator, writer);
+                    await JsonWriter.WriteAsync(Token.Space, writer);
+                    await action(t, writer);
+                });
+            }
+
+            Func<T, PipeWriter, Task> serializer = async (t, writer) =>
+            {
+                await JsonWriter.WriteAsync(Token.BeginObject, writer);
+                await JsonWriter.WriteAsync(Token.CarriageReturn, writer);
+                await JsonWriter.WriteAsync(Token.LineFeed, writer);
+                var count = actions.Count ;
+                foreach (var a in actions)
+                {
+                    await a(t, writer);
+                    count--;
+                    if (count > 0)
+                    {
+                        await JsonWriter.WriteAsync(Token.ValueSeparator, writer);
+                        await JsonWriter.WriteAsync(Token.CarriageReturn, writer);
+                        await JsonWriter.WriteAsync(Token.LineFeed, writer);
+                    }
+
+                    await writer.FlushAsync();
+                }
+
+                await JsonWriter.WriteAsync(Token.CarriageReturn, writer);
+                await JsonWriter.WriteAsync(Token.LineFeed, writer);
+                await JsonWriter.WriteAsync(Token.EndObject, writer);
+                await writer.FlushAsync();
+            };
+
+            return new TypeSerializer(typeof(T), async (o, pw) => { await serializer.Invoke((T) o, pw); });
+
+
+        }
+
+        private static JsonWriter.WriteAsyncDelegate<T> GetObjectWriter<T, VE>(Type pt, VE ve)
+            where VE : IValueExtractorFactory<T>
+        {
+            var checkNull = !pt.IsValueType || Nullable.GetUnderlyingType(pt) != null;
+            var propType = Nullable.GetUnderlyingType(pt) ?? pt;
+            JsonWriter.WriteAsyncDelegate<T> action = null;
+
+            if(KnownTypes.Contains(propType))
+            {
+                var makeActionMI =
+                    typeof(TypeSerializer).GetMethod("MakeAction", BindingFlags.NonPublic | BindingFlags.Static);
+                var makeAction = makeActionMI.MakeGenericMethod(typeof(T), propType, typeof(VE));
+                action = (JsonWriter.WriteAsyncDelegate<T>)makeAction.Invoke(null, new object[] { ve });
+            }
+            else if (propType.IsArray)
+            {
+                var makeActionMI =
+                    typeof(TypeSerializer).GetMethod("MakeArrayAction", BindingFlags.NonPublic | BindingFlags.Static);
+                var makeAction = makeActionMI.MakeGenericMethod(typeof(T), propType, typeof(VE));
+                action = (JsonWriter.WriteAsyncDelegate<T>)makeAction.Invoke(null, new object[] { ve });
+            }
+            else if (typeof(IEnumerable).IsAssignableFrom(propType))
+            {
+                var makeActionMI =
+                    typeof(TypeSerializer).GetMethod("MakeEnumerableAction", BindingFlags.NonPublic | BindingFlags.Static);
+                var makeAction = makeActionMI.MakeGenericMethod(typeof(T), propType, typeof(VE));
+                action = (JsonWriter.WriteAsyncDelegate<T>)makeAction.Invoke(null, new object[] { ve });
+            }
+            else
+            {
+                var makeActionMI =
+                    typeof(TypeSerializer).GetMethod("MakeAction", BindingFlags.NonPublic | BindingFlags.Static);
+                var makeAction = makeActionMI.MakeGenericMethod(typeof(T), propType, typeof(VE));
+                action = (JsonWriter.WriteAsyncDelegate<T>)makeAction.Invoke(null, new object[] { ve });
+            }
+
+            if (checkNull)
+            {
+                var action1 = action;
+                action = (t, w) =>
+                {
+                    var val = ve.ValueExtractor<object>()(t);
+                    if (val is null)
+                    {
+                        return JsonWriter.WriteAsync(Token.Null, w);
+                    }
+                    else
+                    {
+                        return action1(t, w);
+                    }
+                };
+            }
+
+            return action;
+        }
+
+        private static JsonWriter.WriteAsyncDelegate<T> MakeAction<T, V, VE>(VE ve) where VE:IValueExtractorFactory<T>
+        {
+            var valFunc = ve.ValueExtractor<V>();
+            var valWRiter = GetWriter<V>();
+            return (tt, writer) =>
+            {
+                var v = valFunc(tt);
+                return valWRiter(v, writer);
+            };
+        }
+
+        private static JsonWriter.WriteAsyncDelegate<T> MakeArrayAction<T, V, VE>(VE ve) where VE:IValueExtractorFactory<T>
+        {
+            var valFunc = ve.ValueExtractor<V>();
+            var valWRiter = GetArrayWriter<V>();
+            return (tt, writer) =>
+            {
+                var v = valFunc(tt);
+                return valWRiter(v, writer);
+            };
+        }
+
+        private static JsonWriter.WriteAsyncDelegate<T> MakeEnumerableAction<T, V, VE>(VE ve) where VE:IValueExtractorFactory<T>
+        {
+            var valFunc = ve.ValueExtractor<V>();
+            var valWRiter = GetEnumerableWriter<V>();
+            return (tt, writer) =>
+            {
+                var v = valFunc(tt);
+                return valWRiter(v, writer);
+            };
+        }
+
+        private static JsonWriter.WriteAsyncDelegate<T> GetWriter<T>()
+        {
+            if(!KnownTypes.Contains(typeof(T)))
+            {
+                if (typeof(T) == typeof(object))
+                {
+                    return (t, writer) =>
+                    {
+                        var objWriter = GetObjectWriter<object, IdendityValueExtractor<object>>(t.GetType(), default);
+                        return objWriter(t, writer);
+                    };
+                }
+
+                if (typeof(T).IsArray)
+                {
+                    return GetArrayWriter<T>();
+                }
+
+                if (typeof(IEnumerable).IsAssignableFrom(typeof(T)))
+                {
+                    return GetEnumerableWriter<T>();
                 }
             }
 
-            await WriteAsync(Token.CarriageReturn, writer);
-            await WriteAsync(Token.LineFeed, writer);
-            await WriteAsync(Token.EndObject, writer);
-            await writer.FlushAsync();
-        }
-
-        private async Task WriteValue(PipeWriter writer, object propValue, Type propType)
-        {
-            switch (propValue)
+            var writerMethod = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "WriteAsync" &&
+                                     !m.IsGenericMethod &&
+                                     m.GetParameters().First().ParameterType == typeof(T));
+            if (writerMethod is null)
             {
-                case null:
-                    await writer.WriteAsync(Token.Null.Value);
-                    break;
-                case string v:
-                    await WriteAsync(Token.StringDelimiter, writer);
-                    await WriteAsync(v, writer);
-                    await WriteAsync(Token.StringDelimiter, writer);
-                    break;
-                case decimal v:
-                    await WriteAsync(v, writer);
-                    break;
-                case double v:
-                    await WriteAsync(v, writer);
-                    break;
-                case float v:
-                    await WriteAsync(v, writer);
-                    break;
-                case int v:
-                    await WriteAsync(v, writer);
-                    break;
-                case long v:
-                    await WriteAsync(v, writer);
-                    break;
-                case short v:
-                    await WriteAsync(v, writer);
-                    break;
-                case byte v:
-                    await WriteAsync(v, writer);
-                    break;
-                case bool v:
-                    await WriteAsync(v, writer);
-                    break;
-                case var e when propType.IsArray:
-                    await CallArray(writer, propValue, propType.GetElementType());
-                    break;
-                case var e when typeof(IEnumerable).IsAssignableFrom(propType):
-                    await CallEnumerable(writer, propValue, propType);
-                    break;
-                default:
-                    await CallNested(writer, propValue, propType);
-                    break;
+                writerMethod = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "WriteAsync" &&
+                                     m.IsGenericMethod &&
+                                     m.GetGenericArguments().Length == 1);
+            
+                writerMethod = writerMethod.MakeGenericMethod(typeof(T));
             }
+
+            var valParam = Expression.Parameter(typeof(T), "t");
+            var writerParam = Expression.Parameter(typeof(PipeWriter), "writer");
+
+            var body = Expression.Call(null, writerMethod, valParam, writerParam);
+            var expression = Expression.Lambda<JsonWriter.WriteAsyncDelegate<T>>(body, valParam, writerParam);
+
+            return expression.Compile();
         }
 
-        private async Task CallArray(PipeWriter writer, object propValue, Type elementType)
+        private static JsonWriter.WriteAsyncDelegate<T> GetArrayWriter<T>()
         {
-            var method = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(m => m.Name == nameof(WriteAsync) && 
+            var originalType = typeof(T);
+            var elementType = originalType.GetElementType();
+            var valueWriterGeneric = typeof(TypeSerializer).GetMethod("GetWriter", BindingFlags.NonPublic | BindingFlags.Static);
+            var valueWriter = valueWriterGeneric.MakeGenericMethod(elementType);
+
+            var arrayWriterGeneric = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "WriteAsync" &&
                                      m.IsGenericMethod &&
                                      m.GetGenericArguments().Length == 1 &&
                                      m.GetParameters().First().ParameterType.IsArray);
-            var methodInstance = method.MakeGenericMethod(elementType);
-            await (Task) methodInstance.Invoke(this, new[] {propValue, writer });
+            var arrayWriter = arrayWriterGeneric.MakeGenericMethod(elementType);
+
+            var arrParam = Expression.Parameter(typeof(T), "a");
+            var writerParam = Expression.Parameter(typeof(PipeWriter), "writer");
+            var getValueWriterCall = Expression.Call(null, valueWriter);
+            var body = Expression.Call(null,
+                arrayWriter,
+                Expression.Convert(arrParam, originalType),
+                writerParam,
+                getValueWriterCall);
+            var expression = Expression.Lambda<JsonWriter.WriteAsyncDelegate<T>>(
+                body,
+                arrParam,
+                writerParam);
+
+            return expression.Compile();
         }
 
-        private async Task CallEnumerable(PipeWriter writer, object propValue, Type originalType)
+        private static JsonWriter.WriteAsyncDelegate<T> GetEnumerableWriter<T>()
         {
-            var method = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(m => m.Name == nameof(WriteAsync) && m.IsGenericMethod && m.GetGenericArguments().Length == 2);
+            var originalType = typeof(T);
+            var valueWriterGeneric = typeof(TypeSerializer).GetMethod("GetWriter", BindingFlags.NonPublic | BindingFlags.Static);
             var elementType = originalType.IsGenericType ? originalType.GenericTypeArguments.First() : typeof(object);
-            var enumerableType = originalType.IsGenericType ? originalType : typeof(IEnumerable<object>);
-            var value = originalType.IsGenericType ? propValue : ((IEnumerable) propValue).Cast<object>();
-            var methodInstance = method.MakeGenericMethod(enumerableType, elementType);
-            await (Task) methodInstance.Invoke(this, new[] {value, writer });
+
+            var enumerableType = originalType == typeof(IEnumerable) ? typeof(IEnumerable<object>) : originalType;
+            var valueWriter = valueWriterGeneric.MakeGenericMethod(elementType);
+
+            var enumerableWriterGeneric = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "WriteAsync" &&
+                                     m.IsGenericMethod &&
+                                     m.GetGenericArguments().Length == 2);
+            var enumerableWriter = enumerableWriterGeneric.MakeGenericMethod(enumerableType, elementType);
+
+            var eParam = Expression.Parameter(typeof(T), "e");
+            var writerParam = Expression.Parameter(typeof(PipeWriter), "writer");
+
+            var getValueWriterCall = Expression.Call(null, valueWriter);
+            var body = Expression.Call(
+                null,
+                enumerableWriter,
+                Expression.Convert(eParam, originalType),
+                writerParam,
+                getValueWriterCall);
+            var expression = Expression.Lambda<JsonWriter.WriteAsyncDelegate<T>>(body, eParam, writerParam);
+
+            return expression.Compile();
         }
 
-        private async Task CallNested(PipeWriter writer, object propValue, Type propType)
+        public struct JsonWriter
         {
-            var method = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(m =>
-                    m.Name == nameof(WriteAsync) && m.IsGenericMethod &&
-                    m.GetGenericArguments().Length == 1 &&
-                    !m.GetParameters().First().ParameterType.IsArray);
-            var methodInstance = method.MakeGenericMethod(propType);
-            await (Task) methodInstance.Invoke(this, new[] {propValue, writer });
-        }
+            public delegate Task WriteAsyncDelegate<T>(T t, PipeWriter writer);
 
-        public async Task WriteAsync<T>(T[] a, PipeWriter writer)
-        {
-            await writer.WriteAsync(Token.BeginArray.Value);
-            for (int i = 0; i < a.Length; i++)
+            private static readonly ThreadLocal<Encoding> UTF8 = new ThreadLocal<Encoding>(() => Encoding.UTF8);
+
+            private static readonly ThreadLocal<Encoder> UTF8Enc =
+                new ThreadLocal<Encoder>(() => Encoding.UTF8.GetEncoder());
+
+            private static readonly ConcurrentDictionary<Type, TypeSerializer> Serializers =
+                new ConcurrentDictionary<Type, TypeSerializer>();
+
+            public static async Task WriteAsync<T>(T t, PipeWriter writer)
             {
-                await WriteValue(writer, a[i], typeof(T));
-                if (i != a.Length - 1)
-                {
-                    await WriteAsync(Token.ValueSeparator, writer);
-                }
+                var serializer = Serializers.GetOrAdd(typeof(T), Build<T>());
+                await serializer.WriteAsync(t, writer);
             }
-            await writer.WriteAsync(Token.EndArray.Value);
 
-        }
-
-        public async Task WriteAsync<E, T>(E e, PipeWriter writer) where E : IEnumerable<T>
-        {
-            await writer.WriteAsync(Token.BeginArray.Value);
-            var count = e.Count();
-            foreach (var v in e)
+            public static async Task WriteAsync<T>(T[] a, PipeWriter writer, WriteAsyncDelegate<T> writeValue)
             {
-                await WriteValue(writer, v, v.GetType());
-                if (--count > 0)
+                await writer.WriteAsync(Token.BeginArray.Value);
+                for (var i = 0; i < a.Length; i++)
                 {
-                    await WriteAsync(Token.ValueSeparator, writer);
-                }
-            }
-            await writer.WriteAsync(Token.EndArray.Value);
-        }
-
-        public async Task WriteAsync(Token t, PipeWriter writer)
-        {
-            await writer.WriteAsync(t.Value);
-        }
-
-        public async Task WriteAsync(string text, PipeWriter writer)
-        {
-            int totalCharsWritten = 0, charsWritten = 0;
-            int totalBytesWritten = 0, bytesWritten = 0;
-            bool completed = false;
-            unsafe
-            {
-                fixed (char* textPtr = text)
-                    do
+                    await writeValue(a[i], writer);
+                    if (i != a.Length - 1)
                     {
-                        var mem = writer.GetMemory(text.Length);
-                        fixed (byte* bytes = &MemoryMarshal.GetReference(mem.Span))
-                        {
-                            UTF8Enc.Convert(textPtr + totalCharsWritten,
-                                text.Length - totalCharsWritten,
-                                bytes,
-                                mem.Length,
-                                false,
-                                out charsWritten,
-                                out bytesWritten,
-                                out completed);
-                            totalCharsWritten += charsWritten;
-                            totalBytesWritten += bytesWritten;
-                        }
-
-                        writer.Advance(bytesWritten);
-                    } while (!completed);
+                        await WriteAsync(Token.ValueSeparator, writer);
+                    }
                 }
 
-                UTF8Enc.Reset();
-        }
+                await writer.WriteAsync(Token.EndArray.Value);
+            }
 
-        public async Task WriteAsync(decimal dec, PipeWriter writer)
-        {
-            var mem = writer.GetMemory(64);
-            var _ = Utf8Formatter.TryFormat(dec, mem.Span, out int bytesWritten) ? true : throw new ArgumentException(
-                $"Too long decimal {dec}");
-            writer.Advance(bytesWritten);
-        }
+            public static async Task WriteAsync<E, T>(E e, PipeWriter writer, WriteAsyncDelegate<T> writeValue)
+                where E : IEnumerable
+            {
+                await writer.WriteAsync(Token.BeginArray.Value);
+                var te = e.OfType<T>();
+                var count = te.Count();
+                foreach (var v in te)
+                {
+                    await writeValue(v, writer);
+                    if (--count > 0)
+                    {
+                        await WriteAsync(Token.ValueSeparator, writer);
+                    }
+                }
 
-        public async Task WriteAsync(double dbl, PipeWriter writer)
-        {
-            var mem = writer.GetMemory(64);
-            var _ = Utf8Formatter.TryFormat(dbl, mem.Span, out int bytesWritten) ? true : throw new ArgumentException(
-                $"Too long double {dbl}");
-            writer.Advance(bytesWritten);
-        }
+                await writer.WriteAsync(Token.EndArray.Value);
+            }
 
-        public async Task WriteAsync(float flt, PipeWriter writer)
-        {
-            var mem = writer.GetMemory(64);
-            var _ = Utf8Formatter.TryFormat(flt, mem.Span, out int bytesWritten) ? true : throw new ArgumentException(
-                $"Too long float {flt}");
-            writer.Advance(bytesWritten);
-        }
+            public static async Task WriteAsync(Token t, PipeWriter writer)
+            {
+                await writer.WriteAsync(t.Value);
+            }
 
-        public async Task WriteAsync(int intg, PipeWriter writer)
-        {
-            var mem = writer.GetMemory(64);
-            var _ = Utf8Formatter.TryFormat(intg, mem.Span, out int bytesWritten) ? true : throw new ArgumentException(
-                $"Too long int {intg}");
-            writer.Advance(bytesWritten);
-        }
+            public static async Task WriteAsync(Property t, PipeWriter writer)
+            {
+                await WriteAsync(Token.StringDelimiter, writer);
+                await WriteAsync(t.PropertyName, writer);
+                await WriteAsync(Token.StringDelimiter, writer);
+            }
 
-        public async Task WriteAsync(long lng, PipeWriter writer)
-        {
-            var mem = writer.GetMemory(64);
-            var _ = Utf8Formatter.TryFormat(lng, mem.Span, out int bytesWritten) ? true : throw new ArgumentException(
-                $"Too long long {lng}");
-            writer.Advance(bytesWritten);
-        }
+            public static async Task WriteAsync(string text, PipeWriter writer)
+            {
+                await WriteAsync(Token.StringDelimiter, writer);
+                int totalCharsWritten = 0, charsWritten = 0;
+                int totalBytesWritten = 0, bytesWritten = 0;
+                var completed = false;
+                unsafe
+                {
+                    fixed (char* textPtr = text)
+                    {
+                        do
+                        {
+                            var mem = writer.GetMemory(text.Length);
+                            fixed (byte* bytes = &MemoryMarshal.GetReference(mem.Span))
+                            {
+                                UTF8Enc.Value.Convert(textPtr + totalCharsWritten,
+                                    text.Length - totalCharsWritten,
+                                    bytes,
+                                    mem.Length,
+                                    false,
+                                    out charsWritten,
+                                    out bytesWritten,
+                                    out completed);
+                                totalCharsWritten += charsWritten;
+                                totalBytesWritten += bytesWritten;
+                            }
 
-        public async Task WriteAsync(short sht, PipeWriter writer)
-        {
-            var mem = writer.GetMemory(64);
-            var _ = Utf8Formatter.TryFormat(sht, mem.Span, out int bytesWritten) ? true : throw new ArgumentException(
-                $"Too long short {sht}");
-            writer.Advance(bytesWritten);
-        }
+                            writer.Advance(bytesWritten);
+                        } while (!completed);
+                    }
+                }
 
-        public async Task WriteAsync(byte bt, PipeWriter writer)
-        {
-            var mem = writer.GetMemory(64);
-            var _ = Utf8Formatter.TryFormat(bt, mem.Span, out int bytesWritten) ? true : throw new ArgumentException(
-                $"Too long short {bt}");
-            writer.Advance(bytesWritten);
-        }
+                UTF8Enc.Value.Reset();
+                await WriteAsync(Token.StringDelimiter, writer);
+            }
 
-        public async Task WriteAsync(bool bl, PipeWriter writer)
-        {
-            await writer.WriteAsync(bl ? Token.True.Value : Token.False.Value);
+            public static async Task WriteAsync(decimal dec, PipeWriter writer)
+            {
+                var mem = writer.GetMemory(64);
+                var _ = Utf8Formatter.TryFormat(dec, mem.Span, out var bytesWritten)
+                    ? true
+                    : throw new ArgumentException(
+                        $"Too long decimal {dec}");
+                writer.Advance(bytesWritten);
+            }
+
+            public static async Task WriteAsync(double dbl, PipeWriter writer)
+            {
+                var mem = writer.GetMemory(64);
+                var _ = Utf8Formatter.TryFormat(dbl, mem.Span, out var bytesWritten)
+                    ? true
+                    : throw new ArgumentException(
+                        $"Too long double {dbl}");
+                writer.Advance(bytesWritten);
+            }
+
+            public static async Task WriteAsync(float flt, PipeWriter writer)
+            {
+                var mem = writer.GetMemory(64);
+                var _ = Utf8Formatter.TryFormat(flt, mem.Span, out var bytesWritten)
+                    ? true
+                    : throw new ArgumentException(
+                        $"Too long float {flt}");
+                writer.Advance(bytesWritten);
+            }
+
+            public static async Task WriteAsync(int intg, PipeWriter writer)
+            {
+                var mem = writer.GetMemory(64);
+                var _ = Utf8Formatter.TryFormat(intg, mem.Span, out var bytesWritten)
+                    ? true
+                    : throw new ArgumentException(
+                        $"Too long int {intg}");
+                writer.Advance(bytesWritten);
+            }
+
+            public static async Task WriteAsync(long lng, PipeWriter writer)
+            {
+                var mem = writer.GetMemory(64);
+                var _ = Utf8Formatter.TryFormat(lng, mem.Span, out var bytesWritten)
+                    ? true
+                    : throw new ArgumentException(
+                        $"Too long long {lng}");
+                writer.Advance(bytesWritten);
+            }
+
+            public static async Task WriteAsync(short sht, PipeWriter writer)
+            {
+                var mem = writer.GetMemory(64);
+                var _ = Utf8Formatter.TryFormat(sht, mem.Span, out var bytesWritten)
+                    ? true
+                    : throw new ArgumentException(
+                        $"Too long short {sht}");
+                writer.Advance(bytesWritten);
+            }
+
+            public static async Task WriteAsync(byte bt, PipeWriter writer)
+            {
+                var mem = writer.GetMemory(64);
+                var _ = Utf8Formatter.TryFormat(bt, mem.Span, out var bytesWritten)
+                    ? true
+                    : throw new ArgumentException(
+                        $"Too long short {bt}");
+                writer.Advance(bytesWritten);
+            }
+
+            public static async Task WriteAsync(bool bl, PipeWriter writer)
+            {
+                await writer.WriteAsync(bl ? Token.True.Value : Token.False.Value);
+            }
         }
 
         public struct Token
@@ -275,12 +498,17 @@ namespace JsonSlicer
 
             public Token(byte value)
             {
-                Value = new byte[]{value};
+                Value = new[] {value};
             }
 
             public Token(byte[] value)
             {
                 Value = value;
+            }
+
+            public Token(string value)
+            {
+                Value = Encoding.UTF8.GetBytes(value);
             }
 
             public static readonly Token BeginObject = new Token(0x7B);
@@ -295,9 +523,19 @@ namespace JsonSlicer
             public static readonly Token CarriageReturn = new Token(0x0D);
 
             public static readonly Token StringDelimiter = new Token(0x22);
-            public static readonly Token False = new Token(new byte[] { 0x66, 0x61, 0x6C, 0x73, 0x65});
-            public static readonly Token True = new Token(new byte[] { 0x74, 0x72, 0x75, 0x65});
-            public static readonly Token Null = new Token(new byte[] { 0x6E, 0x75, 0x6C, 0x6C});
+            public static readonly Token False = new Token(new byte[] {0x66, 0x61, 0x6C, 0x73, 0x65});
+            public static readonly Token True = new Token(new byte[] {0x74, 0x72, 0x75, 0x65});
+            public static readonly Token Null = new Token(new byte[] {0x6E, 0x75, 0x6C, 0x6C});
+        }
+
+        public struct Property
+        {
+            public Token PropertyName;
+
+            public Property(string name)
+            {
+                PropertyName = new Token(name);
+            }
         }
     }
 }
