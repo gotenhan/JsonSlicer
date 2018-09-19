@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.IO.Pipelines;
@@ -31,19 +32,34 @@ namespace JsonSlicerTests
                 },
                 ArrayList = new ArrayList() { 1, "bla", new SmallNestedType { SmallNested = 1 } }
             };
-            for (int i = 0; i < 1000; i++)
+            long writingElapsed = 0;
+            Task.Run(async () =>
             {
                 await TypeSerializer.JsonWriter.WriteAsync(to, pipe.Writer);
-            }
+                await pipe.Writer.FlushAsync();
+                var stopwatch = Stopwatch.StartNew();
+                for (int i = 0; i < 1000; i++)
+                {
+                    await TypeSerializer.JsonWriter.WriteAsync(to, pipe.Writer);
+                    await pipe.Writer.FlushAsync();
+                }
 
-            pipe.Writer.Complete();
+                pipe.Writer.Complete();
+
+                writingElapsed = stopwatch.ElapsedMilliseconds;
+            });
+
             ReadResult r;
             StringBuilder json = new StringBuilder();
+            long readingElapsed = 0;
             while (true)
             {
+                var stopwatch = Stopwatch.StartNew();
                 r = await pipe.Reader.ReadAsync();
                 if (r.IsCompleted && r.Buffer.IsEmpty)
                 {
+
+                    readingElapsed = stopwatch.ElapsedMilliseconds;
                     break;
                 }
 
@@ -68,7 +84,7 @@ namespace JsonSlicerTests
 ""BoolTrue"": true,
 ""BoolFalse"": false
 }}]
-}}", actual);
+}}", actual, $"Writing took {writingElapsed}, reading took {readingElapsed}");
         }
 
         public class TestObj
