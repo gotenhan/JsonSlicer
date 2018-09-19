@@ -9,6 +9,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.Serialization.Json;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -42,15 +43,22 @@ namespace JsonSlicer
     {
         public Func<T, V> ValueExtractor<V>()
         {
-            return t => (V) (object) t;
+            return t => (V)(object)t;
         }
     }
 
     public struct TypeSerializer
     {
-        private JsonWriter.WriteDelegate<object> _serializer;
-        private static readonly Type[] KnownTypes = new[] {typeof(string)};
+        private static readonly ConcurrentDictionary<Type, TypeSerializer> Serializers =
+            new ConcurrentDictionary<Type, TypeSerializer>();
 
+        private JsonWriter.WriteDelegate<object> _serializer;
+
+        private static readonly Type[] KnownTypes = new[]
+        {
+            typeof(string), typeof(decimal), typeof(double), typeof(float), typeof(int), typeof(long), typeof(short),
+            typeof(byte), typeof(bool)
+        };
 
         public TypeSerializer(JsonWriter.WriteDelegate<object> serializer)
         {
@@ -92,7 +100,7 @@ namespace JsonSlicer
                 await JsonWriter.WriteAsync(Token.BeginObject, writer);
                 await JsonWriter.WriteAsync(Token.CarriageReturn, writer);
                 await JsonWriter.WriteAsync(Token.LineFeed, writer);
-                var count = actions.Count ;
+                var count = actions.Count;
                 foreach (var a in actions)
                 {
                     a(t, writer);
@@ -111,7 +119,7 @@ namespace JsonSlicer
                 await writer.FlushAsync();
             };
 
-            return new TypeSerializer((o, pw) => serializer.Invoke((T) o, pw));
+            return new TypeSerializer((o, pw) => serializer.Invoke((T)o, pw));
         }
 
         private static JsonWriter.WriteDelegate<T> GetObjectWriter<T, VE>(Type pt, VE ve)
@@ -121,12 +129,16 @@ namespace JsonSlicer
             var propType = Nullable.GetUnderlyingType(pt) ?? pt;
             JsonWriter.WriteDelegate<T> action = null;
 
-            if(KnownTypes.Contains(propType))
+            if (KnownTypes.Contains(propType))
             {
                 var makeActionMI =
                     typeof(TypeSerializer).GetMethod("MakeAction", BindingFlags.NonPublic | BindingFlags.Static);
                 var makeAction = makeActionMI.MakeGenericMethod(typeof(T), propType, typeof(VE));
                 action = (JsonWriter.WriteDelegate<T>)makeAction.Invoke(null, new object[] { ve });
+            }
+            else if (Serializers.TryGetValue(pt, out var serializer))
+            {
+                action = serializer.WriteAsync;
             }
             else if (propType.IsArray)
             {
@@ -153,9 +165,10 @@ namespace JsonSlicer
             if (checkNull)
             {
                 var action1 = action;
+                var valFunc = ve.ValueExtractor<object>();
                 action = (t, w) =>
                 {
-                    var val = ve.ValueExtractor<object>()(t);
+                    var val = valFunc(t);
                     if (val is null)
                     {
                         return JsonWriter.WriteAsync(Token.Null, w);
@@ -170,7 +183,7 @@ namespace JsonSlicer
             return action;
         }
 
-        private static JsonWriter.WriteDelegate<T> MakeAction<T, V, VE>(VE ve) where VE:IValueExtractorFactory<T>
+        private static JsonWriter.WriteDelegate<T> MakeAction<T, V, VE>(VE ve) where VE : IValueExtractorFactory<T>
         {
             var valFunc = ve.ValueExtractor<V>();
             var valWRiter = GetWriter<V>();
@@ -181,7 +194,7 @@ namespace JsonSlicer
             };
         }
 
-        private static JsonWriter.WriteDelegate<T> MakeArrayAction<T, V, VE>(VE ve) where VE:IValueExtractorFactory<T>
+        private static JsonWriter.WriteDelegate<T> MakeArrayAction<T, V, VE>(VE ve) where VE : IValueExtractorFactory<T>
         {
             var valFunc = ve.ValueExtractor<V>();
             var valWRiter = GetArrayWriter<V>();
@@ -192,7 +205,7 @@ namespace JsonSlicer
             };
         }
 
-        private static JsonWriter.WriteDelegate<T> MakeEnumerableAction<T, V, VE>(VE ve) where VE:IValueExtractorFactory<T>
+        private static JsonWriter.WriteDelegate<T> MakeEnumerableAction<T, V, VE>(VE ve) where VE : IValueExtractorFactory<T>
         {
             var valFunc = ve.ValueExtractor<V>();
             var valWRiter = GetEnumerableWriter<V>();
@@ -205,7 +218,7 @@ namespace JsonSlicer
 
         private static JsonWriter.WriteDelegate<T> GetWriter<T>()
         {
-            if(!KnownTypes.Contains(typeof(T)))
+            if (!KnownTypes.Contains(typeof(T)))
             {
                 if (typeof(T) == typeof(object))
                 {
@@ -237,7 +250,7 @@ namespace JsonSlicer
                 .FirstOrDefault(m => m.Name == "WriteAsync" &&
                                      m.IsGenericMethod &&
                                      m.GetGenericArguments().Length == 1);
-            
+
                 writerMethod = writerMethod.MakeGenericMethod(typeof(T));
             }
 
@@ -319,12 +332,9 @@ namespace JsonSlicer
             private static readonly ThreadLocal<Encoder> UTF8Enc =
                 new ThreadLocal<Encoder>(() => Encoding.UTF8.GetEncoder());
 
-            private static readonly ConcurrentDictionary<Type, TypeSerializer> Serializers =
-                new ConcurrentDictionary<Type, TypeSerializer>();
-
             public static ValueTask WriteAsync<T>(T t, PipeWriter writer)
             {
-                var serializer = Serializers.GetOrAdd(typeof(T), Build<T>());
+                var serializer = Serializers.GetOrAdd(typeof(T), _ => Build<T>());
                 return serializer.WriteAsync(t, writer);
             }
 
@@ -505,7 +515,7 @@ namespace JsonSlicer
 
             public Token(byte value)
             {
-                Value = new[] {value};
+                Value = new[] { value };
             }
 
             public Token(byte[] value)
@@ -530,9 +540,9 @@ namespace JsonSlicer
             public static readonly Token CarriageReturn = new Token(0x0D);
 
             public static readonly Token StringDelimiter = new Token(0x22);
-            public static readonly Token False = new Token(new byte[] {0x66, 0x61, 0x6C, 0x73, 0x65});
-            public static readonly Token True = new Token(new byte[] {0x74, 0x72, 0x75, 0x65});
-            public static readonly Token Null = new Token(new byte[] {0x6E, 0x75, 0x6C, 0x6C});
+            public static readonly Token False = new Token(new byte[] { 0x66, 0x61, 0x6C, 0x73, 0x65 });
+            public static readonly Token True = new Token(new byte[] { 0x74, 0x72, 0x75, 0x65 });
+            public static readonly Token Null = new Token(new byte[] { 0x6E, 0x75, 0x6C, 0x6C });
         }
 
         public struct Property

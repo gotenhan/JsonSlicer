@@ -51,23 +51,28 @@ namespace JsonSlicerTests
 
             ReadResult r;
             StringBuilder json = new StringBuilder();
+            var ms = new MemoryStream(new byte[4439 * 1000]);
             long readingElapsed = 0;
-            while (true)
             {
                 var stopwatch = Stopwatch.StartNew();
-                r = await pipe.Reader.ReadAsync();
-                if (r.IsCompleted && r.Buffer.IsEmpty)
+
+                do
                 {
+                    r = await pipe.Reader.ReadAsync();
 
-                    readingElapsed = stopwatch.ElapsedMilliseconds;
-                    break;
-                }
+                    foreach (var b in r.Buffer)
+                    {
+                        //json.Append(Encoding.UTF8.GetString(b.Span));
+                        ms.Write(b.Span);
+                    }
 
-                json.Append(Encoding.UTF8.GetString(r.Buffer.First.Span));
-                pipe.Reader.AdvanceTo(r.Buffer.GetPosition(r.Buffer.First.Length));
+                    pipe.Reader.AdvanceTo(r.Buffer.End);
+                } while (!(r.IsCompleted && r.Buffer.IsEmpty));
+
+                readingElapsed = stopwatch.ElapsedMilliseconds;
             }
 
-            var actual = json.ToString();
+            var actual = Encoding.UTF8.GetString(ms.ToArray());//json.ToString());
             Assert.AreEqual($@"{{
 ""String"": ""{new string('ক', 4096)}"",
 ""NullString"": null,
