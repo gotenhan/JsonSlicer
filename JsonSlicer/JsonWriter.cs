@@ -88,34 +88,34 @@ namespace JsonSlicer
 
                 var propName = new Property(prop.Name);
 
-                actions.Add((t, writer) =>
+                actions.Add(async (t, writer) =>
                 {
-                    JsonWriter.WriteAsync(propName, writer);
-                    return action(t, writer);
+                    await JsonWriter.WriteAsync(propName, writer);
+                    await action(t, writer);
                 });
             }
 
             JsonWriter.WriteDelegate<T> serializer = async (t, writer) =>
             {
-                await JsonWriter.WriteAsync(Token.BeginObject, writer);
-                await JsonWriter.WriteAsync(Token.CarriageReturn, writer);
-                await JsonWriter.WriteAsync(Token.LineFeed, writer);
+                writer.Write(Token.BeginObject.Value);
+                writer.Write(Token.CarriageReturn.Value);
+                writer.Write(Token.LineFeed.Value);
                 var count = actions.Count;
-                foreach (var a in actions)
+                for (var i = 0; i < count; i++)
                 {
-                    a(t, writer);
-                    count--;
-                    if (count > 0)
+                    var a = actions[i];
+                    await a(t, writer);
+                    if (i!=count-1)
                     {
-                        await JsonWriter.WriteAsync(Token.ValueSeparator, writer);
-                        await JsonWriter.WriteAsync(Token.CarriageReturn, writer);
-                        await JsonWriter.WriteAsync(Token.LineFeed, writer);
+                        writer.Write(Token.ValueSeparator.Value);
+                        writer.Write(Token.CarriageReturn.Value);
+                        writer.Write(Token.LineFeed.Value);
                     }
                 }
 
-                await JsonWriter.WriteAsync(Token.CarriageReturn, writer);
-                await JsonWriter.WriteAsync(Token.LineFeed, writer);
-                await JsonWriter.WriteAsync(Token.EndObject, writer);
+                writer.Write(Token.CarriageReturn.Value);
+                writer.Write(Token.LineFeed.Value);
+                writer.Write(Token.EndObject.Value);
                 await writer.FlushAsync();
             };
 
@@ -254,13 +254,7 @@ namespace JsonSlicer
                 writerMethod = writerMethod.MakeGenericMethod(typeof(T));
             }
 
-            var valParam = Expression.Parameter(typeof(T), "t");
-            var writerParam = Expression.Parameter(typeof(PipeWriter), "writer");
-
-            var body = Expression.Call(null, writerMethod, valParam, writerParam);
-            var expression = Expression.Lambda<JsonWriter.WriteDelegate<T>>(body, valParam, writerParam);
-
-            return expression.Compile();
+            return (JsonWriter.WriteDelegate<T>)writerMethod.CreateDelegate(typeof(JsonWriter.WriteDelegate<T>));
         }
 
         private static JsonWriter.WriteDelegate<T> GetArrayWriter<T>()
@@ -338,24 +332,29 @@ namespace JsonSlicer
                 return serializer.WriteAsync(t, writer);
             }
 
-            public static ValueTask WriteAsync<T>(T[] a, PipeWriter writer, WriteDelegate<T> writeValue)
+            public static ValueTask WriteAsync(object t, PipeWriter writer)
+            {
+                var objWriter = GetObjectWriter<object, IdendityValueExtractor<object>>(t.GetType(), default);
+                return objWriter(t, writer);
+            }
+
+            public static async ValueTask WriteAsync<T>(T[] a, PipeWriter writer, WriteDelegate<T> writeValue)
             {
                 writer.Write(Token.BeginArray.Value);
 
                 for (var i = 0; i < a.Length; i++)
                 {
-                    writeValue(a[i], writer);
+                    await writeValue(a[i], writer);
                     if (i != a.Length - 1)
                     {
-                        WriteAsync(Token.ValueSeparator, writer);
+                        writer.Write(Token.ValueSeparator.Value);
                     }
                 }
 
-                writer.WriteAsync(Token.EndArray.Value);
-                return new ValueTask();
+                writer.Write(Token.EndArray.Value);
             }
 
-            public static ValueTask WriteAsync<E, T>(E e, PipeWriter writer, WriteDelegate<T> writeValue)
+            public static async ValueTask WriteAsync<E, T>(E e, PipeWriter writer, WriteDelegate<T> writeValue)
                 where E : IEnumerable
             {
                 writer.Write(Token.BeginArray.Value);
@@ -363,34 +362,30 @@ namespace JsonSlicer
                 var count = te.Count();
                 foreach (var v in te)
                 {
-                    writeValue(v, writer);
+                    await writeValue(v, writer);
                     if (--count > 0)
                     {
-                        WriteAsync(Token.ValueSeparator, writer);
+                        writer.Write(Token.ValueSeparator.Value);
                     }
                 }
 
                 writer.Write(Token.EndArray.Value);
-                return new ValueTask();
             }
 
             public static ValueTask WriteAsync(Token t, PipeWriter writer)
             {
-                writer.WriteAsync(t.Value);
-                return new ValueTask();
+                writer.Write(t.Value);
+                return default;
             }
 
             public static ValueTask WriteAsync(Property t, PipeWriter writer)
             {
-                WriteAsync(Token.StringDelimiter, writer);
-                WriteAsync(t.QuotedPropertyNameWithSeparator, writer);
-                WriteAsync(Token.StringDelimiter, writer);
-                return new ValueTask();
+                return WriteAsync(t.QuotedPropertyNameWithSeparator, writer);
             }
 
             public static ValueTask WriteAsync(string text, PipeWriter writer)
             {
-                WriteAsync(Token.StringDelimiter, writer);
+                writer.Write(Token.StringDelimiter.Value);
                 int totalCharsWritten = 0, charsWritten = 0;
                 int totalBytesWritten = 0, bytesWritten = 0;
                 var completed = false;
@@ -421,91 +416,91 @@ namespace JsonSlicer
                 }
 
                 UTF8Enc.Value.Reset();
-                WriteAsync(Token.StringDelimiter, writer);
-                return new ValueTask();
+                writer.Write(Token.StringDelimiter.Value);
+                return default;
             }
 
             public static ValueTask WriteAsync(decimal dec, PipeWriter writer)
             {
                 var mem = writer.GetMemory(64);
-                var _ = Utf8Formatter.TryFormat(dec, mem.Span, out var bytesWritten)
+                _ = Utf8Formatter.TryFormat(dec, mem.Span, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(
                         $"Too long decimal {dec}");
                 writer.Advance(bytesWritten);
-                return new ValueTask();
+                return default;
             }
 
             public static ValueTask WriteAsync(double dbl, PipeWriter writer)
             {
                 var mem = writer.GetMemory(64);
-                var _ = Utf8Formatter.TryFormat(dbl, mem.Span, out var bytesWritten)
+                _ = Utf8Formatter.TryFormat(dbl, mem.Span, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(
                         $"Too long double {dbl}");
                 writer.Advance(bytesWritten);
-                return new ValueTask();
+                return default;
             }
 
             public static ValueTask WriteAsync(float flt, PipeWriter writer)
             {
                 var mem = writer.GetMemory(64);
-                var _ = Utf8Formatter.TryFormat(flt, mem.Span, out var bytesWritten)
+                _ = Utf8Formatter.TryFormat(flt, mem.Span, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(
                         $"Too long float {flt}");
                 writer.Advance(bytesWritten);
-                return new ValueTask();
+                return default;
             }
 
             public static ValueTask WriteAsync(int intg, PipeWriter writer)
             {
                 var mem = writer.GetMemory(64);
-                var _ = Utf8Formatter.TryFormat(intg, mem.Span, out var bytesWritten)
+                _ = Utf8Formatter.TryFormat(intg, mem.Span, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(
                         $"Too long int {intg}");
                 writer.Advance(bytesWritten);
-                return new ValueTask();
+                return default;
             }
 
             public static ValueTask WriteAsync(long lng, PipeWriter writer)
             {
                 var mem = writer.GetMemory(64);
-                var _ = Utf8Formatter.TryFormat(lng, mem.Span, out var bytesWritten)
+                _ = Utf8Formatter.TryFormat(lng, mem.Span, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(
                         $"Too long long {lng}");
                 writer.Advance(bytesWritten);
-                return new ValueTask();
+                return default;
             }
 
             public static ValueTask WriteAsync(short sht, PipeWriter writer)
             {
                 var mem = writer.GetMemory(64);
-                var _ = Utf8Formatter.TryFormat(sht, mem.Span, out var bytesWritten)
+                _ = Utf8Formatter.TryFormat(sht, mem.Span, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(
                         $"Too long short {sht}");
                 writer.Advance(bytesWritten);
-                return new ValueTask();
+                return default;
             }
 
             public static ValueTask WriteAsync(byte bt, PipeWriter writer)
             {
                 var mem = writer.GetMemory(64);
-                var _ = Utf8Formatter.TryFormat(bt, mem.Span, out var bytesWritten)
+                _ = Utf8Formatter.TryFormat(bt, mem.Span, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(
                         $"Too long short {bt}");
                 writer.Advance(bytesWritten);
-                return new ValueTask();
+                return default;
             }
 
             public static ValueTask WriteAsync(bool bl, PipeWriter writer)
             {
                 writer.Write(bl ? Token.True.Value : Token.False.Value);
-                return new ValueTask();
+                return default;
             }
         }
 
