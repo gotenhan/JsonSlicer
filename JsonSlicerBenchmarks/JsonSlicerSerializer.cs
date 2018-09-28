@@ -16,7 +16,7 @@ namespace JsonSlicerBenchmarks
                 var ms = new MemoryStream();
                 do
                 {
-                    r = await pipe2.Reader.ReadAsync();
+                    r = await pipe2.Reader.ReadAsync().ConfigureAwait(false);
 
                     foreach (var b in r.Buffer)
                     {
@@ -31,8 +31,8 @@ namespace JsonSlicerBenchmarks
 
             async Task Write(Pipe pipe1)
             {
-                await TypeSerializer.JsonWriter.WriteAsync(o, pipe1.Writer);
-                await pipe1.Writer.FlushAsync();
+                await TypeSerializer.JsonWriter.WriteAsync(o, pipe1.Writer).ConfigureAwait(false);
+                await pipe1.Writer.FlushAsync().ConfigureAwait(false);
                 pipe1.Writer.Complete();
             }
 

@@ -22,9 +22,10 @@ namespace JsonSlicerTests
             var pipe = new Pipe();
             var to = GetTestObject();
 
-            Write(to, pipe);
+            var write = Write(to, pipe);
 
-            var json = await Read(pipe);
+            var json = await Read(pipe).ConfigureAwait(false);
+            await write;
 
 
             var actual = json.ToString();
@@ -51,15 +52,16 @@ namespace JsonSlicerTests
         public async Task Profile()
         {
             var pipe = new Pipe();
-            var to = GetTestObject();
-            Write(to, pipe, 10000);
-            var h = await Read(pipe);
+            var to = GetTestObject(false);
+            var write = Write(to, pipe, 100000);
+            var h = await Read(pipe).ConfigureAwait(false);
+            await write;
             Assert.Greater(h.ToString().Length, 1);
         }
 
-        private static TestObj GetTestObject()
+        private static TestObj GetTestObject(bool arrayList = true)
         {
-            return new TestObj()
+            var to = new TestObj()
             {
                 String = new string('ক', 40),
                 Decimal = decimal.MaxValue,
@@ -70,8 +72,10 @@ namespace JsonSlicerTests
                     ArrayBytes = new byte[] {1, 2, 3 },
                     ListFloats = new List<float> { 1.0f, 2.0f, 3.0f, -4.99999f, float.MaxValue, float.MinValue}
                 },
-                //ArrayList = new ArrayList() { 1, "bla", new SmallNestedType { SmallNested = 1 } }
             };
+            if (arrayList)
+                to.ArrayList = new ArrayList() {1, "bla", new SmallNestedType {SmallNested = 1}};
+            return to;
         }
 
         [Test]
@@ -80,20 +84,21 @@ namespace JsonSlicerTests
             var pipe = new Pipe();
             var to = new NestedB();
 
-            Write(to, pipe);
+            var read = Read(pipe);
+            await Write(to, pipe).ConfigureAwait(false);
 
-            var json = await Read(pipe);
-
+            var json = await read;
 
             var actual = json.ToString();
             Assert.IsNotNull(actual);
         }
+
         private static async Task Write<T>(T to, Pipe pipe, int times = 1)
         {
             for (int i = 0; i < times; i++)
             {
-                await TypeSerializer.JsonWriter.WriteAsync(to, pipe.Writer);
-                await pipe.Writer.FlushAsync();
+                await TypeSerializer.JsonWriter.WriteAsync(to, pipe.Writer).ConfigureAwait(false);
+                var fr = await pipe.Writer.FlushAsync().ConfigureAwait(false);
             }
 
             pipe.Writer.Complete();
@@ -105,7 +110,7 @@ namespace JsonSlicerTests
             StringBuilder json = new StringBuilder();
             while (!r.IsCompleted)
             {
-                r = await pipe.Reader.ReadAsync();
+                r = await pipe.Reader.ReadAsync().ConfigureAwait(false);
 
                 foreach (var b in r.Buffer)
                 {
@@ -115,6 +120,7 @@ namespace JsonSlicerTests
                 pipe.Reader.AdvanceTo(r.Buffer.End);
             }
 
+            pipe.Reader.Complete();
             return json;
         }
 
