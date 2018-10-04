@@ -59,6 +59,17 @@ namespace JsonSlicerTests
             Assert.Greater(h.ToString().Length, 1);
         }
 
+        [Test]
+        public async Task RoslynGeneration()
+        {
+            Pipe pipe = new Pipe();
+            var writer = new JsonWriterGenerator().Generate<NestedB>();
+            await writer.Write(null, pipe.Writer);
+            var json = await Read(pipe);
+            Assert.AreEqual("test", json);
+
+        }
+
         private static TestObj GetTestObject(bool arrayList = true)
         {
             var to = new TestObj()
@@ -97,7 +108,7 @@ namespace JsonSlicerTests
         {
             for (int i = 0; i < times; i++)
             {
-                await TypeSerializer.JsonWriter.WriteAsync(to, pipe.Writer).ConfigureAwait(false);
+                await TypeSerializer.JsonWriter.WriteObject(to, pipe.Writer).ConfigureAwait(false);
                 var fr = await pipe.Writer.FlushAsync().ConfigureAwait(false);
             }
 

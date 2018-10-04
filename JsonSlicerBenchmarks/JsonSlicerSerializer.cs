@@ -31,7 +31,7 @@ namespace JsonSlicerBenchmarks
 
             async Task Write(Pipe pipe1)
             {
-                await TypeSerializer.JsonWriter.WriteAsync(o, pipe1.Writer).ConfigureAwait(false);
+                await TypeSerializer.JsonWriter.WriteObject(o, pipe1.Writer).ConfigureAwait(false);
                 await pipe1.Writer.FlushAsync().ConfigureAwait(false);
                 pipe1.Writer.Complete();
             }

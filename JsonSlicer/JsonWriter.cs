@@ -4,6 +4,7 @@ using System.Buffers.Text;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.IO.Pipelines;
 using System.Linq;
 using System.Linq.Expressions;
@@ -13,6 +14,8 @@ using System.Runtime.Serialization.Json;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace JsonSlicer
 {
@@ -98,7 +101,7 @@ namespace JsonSlicer
 
                 actions.Add(async (t, writer) =>
                 {
-                    await JsonWriter.WriteAsync(propName, writer).ConfigureAwait(false);
+                    JsonWriter.WritePrimitive(propName, writer);
                     await action(t, writer).ConfigureAwait(false);
                 });
             }
@@ -170,7 +173,18 @@ namespace JsonSlicer
             {
                 var action1 = action;
                 var valFunc = ve.ValueExtractor<object>();
-                action = (t, w) => valFunc(t) == null ? JsonWriter.WriteAsync(Token.Null, w) : action1(t, w);
+                action = (t, w) =>
+                {
+                    if (valFunc(t) == null)
+                    {
+                        JsonWriter.WritePrimitive(Token.Null, w);
+                        return default;
+                    }
+                    else
+                    {
+                        return action1(t, w);
+                    }
+                };
             }
 
             return action;
@@ -236,20 +250,28 @@ namespace JsonSlicer
             }
 
             var writerMethod = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .FirstOrDefault(m => m.Name == "WriteAsync" &&
+                .FirstOrDefault(m => m.Name == "WritePrimitive" &&
                                      !m.IsGenericMethod &&
                                      m.GetParameters().First().ParameterType == typeof(T));
             if (writerMethod is null)
             {
                 writerMethod = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .FirstOrDefault(m => m.Name == "WriteAsync" &&
+                .FirstOrDefault(m => m.Name == "WriteObject" &&
                                      m.IsGenericMethod &&
                                      m.GetGenericArguments().Length == 1);
 
                 writerMethod = writerMethod.MakeGenericMethod(typeof(T));
+                return (JsonWriter.WriteDelegate<T>)writerMethod.CreateDelegate(typeof(JsonWriter.WriteDelegate<T>));
             }
-
-            return (JsonWriter.WriteDelegate<T>)writerMethod.CreateDelegate(typeof(JsonWriter.WriteDelegate<T>));
+            else
+            { 
+                var @delegate = (Action<T, PipeWriter>)writerMethod.CreateDelegate(typeof(Action<T, PipeWriter>));
+                return (t, pw) =>
+                {
+                    @delegate.Invoke(t, pw);
+                    return default;
+                };
+            }
         }
 
         private static JsonWriter.WriteDelegate<T> GetArrayWriter<T>()
@@ -261,7 +283,7 @@ namespace JsonSlicer
             var valueWriter = valueWriterGenerator.Invoke(null, new object[]{});
 
             var arrayWriterGeneric = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .FirstOrDefault(m => m.Name == "WriteAsync" &&
+                .FirstOrDefault(m => m.Name == "WriteArray" &&
                                      m.IsGenericMethod &&
                                      m.GetGenericArguments().Length == 1 &&
                                      m.GetParameters().First().ParameterType.IsArray);
@@ -294,7 +316,7 @@ namespace JsonSlicer
             var valueWriter = valueWriterGenerator.Invoke(null, new object[]{});
 
             var enumerableWriterGeneric = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .FirstOrDefault(m => m.Name == "WriteAsync" &&
+                .FirstOrDefault(m => m.Name == "WriteEnumerable" &&
                                      m.IsGenericMethod &&
                                      m.GetGenericArguments().Length == 2);
             var enumerableWriter = enumerableWriterGeneric.MakeGenericMethod(enumerableType, elementType);
@@ -318,40 +340,38 @@ namespace JsonSlicer
         {
             public delegate ValueTask WriteDelegate<T>(T t, PipeWriter writer);
 
-            private static readonly ThreadLocal<Encoding> UTF8 = new ThreadLocal<Encoding>(() => Encoding.UTF8);
-
             private static readonly ThreadLocal<Encoder> UTF8Enc =
                 new ThreadLocal<Encoder>(() => Encoding.UTF8.GetEncoder());
 
-            public static ValueTask WriteAsync<T>(T t, PipeWriter writer)
+            public static ValueTask WriteObject<T>(T t, PipeWriter writer)
             {
                 var serializer = Serializers.GetOrAdd(typeof(T), _ => Build<T>());
                 return serializer.WriteAsync(t, writer);
             }
 
-            public static ValueTask WriteAsync(object t, PipeWriter writer)
+            public static ValueTask WriteObject(object t, PipeWriter writer)
             {
                 var objWriter = GetObjectWriter<object, IdendityValueExtractor<object>>(t.GetType(), default);
                 return objWriter(t, writer);
             }
 
-            public static async ValueTask WriteAsync<T>(T[] a, PipeWriter writer, WriteDelegate<T> writeValue)
+            public static async ValueTask WriteArray<T>(T[] a, PipeWriter writer, WriteDelegate<T> writeValue)
             {
-                writer.Write(Token.BeginArray.Value);
+                WritePrimitive(Token.BeginArray, writer);
 
                 for (var i = 0; i < a.Length; i++)
                 {
                     await writeValue(a[i], writer).ConfigureAwait(false);
                     if (i != a.Length - 1)
                     {
-                        writer.Write(Token.ValueSeparator.Value);
+                        WritePrimitive(Token.ValueSeparator, writer);
                     }
                 }
 
-                writer.Write(Token.EndArray.Value);
+                WritePrimitive(Token.EndArray, writer);
             }
 
-            public static async ValueTask WriteAsync<E, T>(E e, PipeWriter writer, WriteDelegate<T> writeValue)
+            public static async ValueTask WriteEnumerable<E, T>(E e, PipeWriter writer, WriteDelegate<T> writeValue)
                 where E : IEnumerable
             {
                 writer.Write(Token.BeginArray.Value);
@@ -369,20 +389,19 @@ namespace JsonSlicer
                 writer.Write(Token.EndArray.Value);
             }
 
-            public static ValueTask WriteAsync(Token t, PipeWriter writer)
+            public static void WritePrimitive(Token t, PipeWriter writer)
             {
                 writer.Write(t.Value);
-                return default;
             }
 
-            public static ValueTask WriteAsync(Property t, PipeWriter writer)
+            public static void WritePrimitive(Property t, PipeWriter writer)
             {
-                return WriteAsync(t.QuotedPropertyNameWithSeparator, writer);
+                WritePrimitive(t.QuotedPropertyNameWithSeparator, writer);
             }
 
-            public static ValueTask WriteAsync(string text, PipeWriter writer)
+            public static void WritePrimitive(string text, PipeWriter writer)
             {
-                writer.Write(Token.StringDelimiter.Value);
+                WritePrimitive(Token.StringDelimiter, writer);
                 int totalCharsWritten = 0, charsWritten = 0;
                 int totalBytesWritten = 0, bytesWritten = 0;
                 var completed = false;
@@ -413,11 +432,10 @@ namespace JsonSlicer
                 }
 
                 UTF8Enc.Value.Reset();
-                writer.Write(Token.StringDelimiter.Value);
-                return default;
+                WritePrimitive(Token.StringDelimiter, writer);
             }
 
-            public static ValueTask WriteAsync(decimal dec, PipeWriter writer)
+            public static void WritePrimitive(decimal dec, PipeWriter writer)
             {
                 var mem = writer.GetSpan(64);
                 _ = Utf8Formatter.TryFormat(dec, mem, out var bytesWritten)
@@ -425,21 +443,19 @@ namespace JsonSlicer
                     : throw new ArgumentException(
                         $"Too long decimal {dec}");
                 writer.Advance(bytesWritten);
-                return default;
             }
 
-            public static ValueTask WriteAsync(double dbl, PipeWriter writer)
+            public static void WritePrimitive(double dbl, PipeWriter writer)
             {
-                var mem = writer.GetSpan(64);
+                var mem = writer.GetSpan();
                 _ = Utf8Formatter.TryFormat(dbl, mem, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(
                         $"Too long double {dbl}");
                 writer.Advance(bytesWritten);
-                return default;
             }
 
-            public static ValueTask WriteAsync(float flt, PipeWriter writer)
+            public static void WritePrimitive(float flt, PipeWriter writer)
             {
                 var mem = writer.GetSpan(64);
                 _ = Utf8Formatter.TryFormat(flt, mem, out var bytesWritten)
@@ -447,21 +463,19 @@ namespace JsonSlicer
                     : throw new ArgumentException(
                         $"Too long float {flt}");
                 writer.Advance(bytesWritten);
-                return default;
             }
 
-            public static ValueTask WriteAsync(int intg, PipeWriter writer)
+            public static void WritePrimitive(int intg, PipeWriter writer)
             {
-                var mem = writer.GetSpan(64);
+                var mem = writer.GetSpan(32);
                 _ = Utf8Formatter.TryFormat(intg, mem, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(
                         $"Too long int {intg}");
                 writer.Advance(bytesWritten);
-                return default;
             }
 
-            public static ValueTask WriteAsync(long lng, PipeWriter writer)
+            public static void WritePrimitive(long lng, PipeWriter writer)
             {
                 var mem = writer.GetSpan(64);
                 _ = Utf8Formatter.TryFormat(lng, mem, out var bytesWritten)
@@ -469,35 +483,31 @@ namespace JsonSlicer
                     : throw new ArgumentException(
                         $"Too long long {lng}");
                 writer.Advance(bytesWritten);
-                return default;
             }
 
-            public static ValueTask WriteAsync(short sht, PipeWriter writer)
+            public static void WritePrimitive(short sht, PipeWriter writer)
             {
-                var mem = writer.GetSpan(64);
+                var mem = writer.GetSpan(8);
                 _ = Utf8Formatter.TryFormat(sht, mem, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(
                         $"Too long short {sht}");
                 writer.Advance(bytesWritten);
-                return default;
             }
 
-            public static ValueTask WriteAsync(byte bt, PipeWriter writer)
+            public static void WritePrimitive(byte bt, PipeWriter writer)
             {
-                var mem = writer.GetSpan(64);
+                var mem = writer.GetSpan(4);
                 _ = Utf8Formatter.TryFormat(bt, mem, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(
                         $"Too long short {bt}");
                 writer.Advance(bytesWritten);
-                return default;
             }
 
-            public static ValueTask WriteAsync(bool bl, PipeWriter writer)
+            public static void WritePrimitive(bool bl, PipeWriter writer)
             {
                 writer.Write(bl ? Token.True.Value : Token.False.Value);
-                return default;
             }
         }
 
@@ -550,6 +560,95 @@ namespace JsonSlicer
                     Token.NameSeparator,
                     Token.Space);
             }
+        }
+    }
+
+    public interface IJsonWriter
+    {
+        ValueTask Write(object o, PipeWriter writer);
+    }
+
+    public interface IJsonWriter<T>: IJsonWriter
+    {
+        ValueTask Write(T t, PipeWriter writer);
+    }
+
+    public class JsonWriterGenerator
+    {
+        public static MethodInfo GenericGenerate =
+            typeof(JsonWriterGenerator).GetMethod(nameof(Generate), BindingFlags.Instance | BindingFlags.Public);
+        public IJsonWriter Generate(Type t)
+        {
+            var mi = GenericGenerate.MakeGenericMethod(t);
+            return (IJsonWriter)mi.Invoke(this, new object[]{});
+        }
+
+        public IJsonWriter<T> Generate<T>()
+        {
+            var serializedType = typeof(T).FullName;
+            var serializerType = $"JsonWriter_{typeof(T).Name}_{Math.Abs(serializedType.GetHashCode())}";
+            var tree = SyntaxFactory.ParseCompilationUnit($@"
+namespace JsonSlicer.GeneratedSerializers 
+{{
+  using global::System.Buffers;
+  public class {serializerType} : global::JsonSlicer.IJsonWriter<global::{serializedType}>
+  {{
+    public global::System.Threading.Tasks.ValueTask Write(object obj, System.IO.Pipelines.PipeWriter pipeWriter)
+    {{
+        pipeWriter.Write(System.Text.Encoding.UTF8.GetBytes(""Writing object of type {typeof(T).Name}""));
+        return default; 
+    }}
+
+    public global::System.Threading.Tasks.ValueTask Write(global::{serializedType} obj, System.IO.Pipelines.PipeWriter pipeWriter)
+    {{
+        pipeWriter.Write(System.Text.Encoding.UTF8.GetBytes(""Writing object of type {typeof(T).Name}""));
+        return default; 
+    }}
+  }}
+}}", 0, new CSharpParseOptions(LanguageVersion.CSharp7_3, DocumentationMode.None, SourceCodeKind.Regular)).SyntaxTree;
+            var trustedAssembliesPaths = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")).Split(Path.PathSeparator);
+            var systemAssemblies = new[]
+            {
+                "System.Runtime",
+                "mscorlib"
+            };
+            var systemAssembliesLocations = systemAssemblies
+                .Select(a => trustedAssembliesPaths.First(p => Path.GetFileNameWithoutExtension(p) == a));
+            var assemblyName = serializedType;
+            var references = systemAssembliesLocations.Concat(new[]
+            {
+                typeof(PipeWriter).GetTypeInfo().Assembly.Location,
+                typeof(T).GetTypeInfo().Assembly.Location,
+                typeof(IJsonWriter<>).GetTypeInfo().Assembly.Location,
+                typeof(System.Buffers.BuffersExtensions).GetTypeInfo().Assembly.Location,
+            }).Select(al => MetadataReference.CreateFromFile(al));
+
+            var compilation = CSharpCompilation.Create(
+                assemblyName,
+                new[] {tree},
+                references,
+                new CSharpCompilationOptions(
+                    outputKind: OutputKind.DynamicallyLinkedLibrary,
+                    optimizationLevel: OptimizationLevel.Release));
+
+            Assembly assembly = null;
+            using (var ms = new MemoryStream())
+            {
+                var er = compilation.Emit(ms);
+                if (er.Success)
+                {
+                    assembly = System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromStream(ms);
+                }
+                else
+                {
+                    throw new ApplicationException(
+                        string.Join(Environment.NewLine, er.Diagnostics.Select(d => d.ToString())) + 
+                        Environment.NewLine + "===============" + Environment.NewLine +
+                        tree.GetText());
+                }
+            }
+
+            return (IJsonWriter<T>)Activator.CreateInstance(assembly.DefinedTypes.First());
         }
     }
 }
