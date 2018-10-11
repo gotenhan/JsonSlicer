@@ -46,7 +46,7 @@ namespace JsonSlicer
     {
         public Func<T, V> ValueExtractor<V>()
         {
-            return t => (V)(object)t;
+            return t => (V) (object) t;
         }
     }
 
@@ -74,7 +74,7 @@ namespace JsonSlicer
             {
                 await _serializer(t, writer).ConfigureAwait(false);
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 writer.Complete(ex);
                 throw;
@@ -109,8 +109,7 @@ namespace JsonSlicer
             async ValueTask Serializer(T t, PipeWriter writer)
             {
                 writer.Write(Token.BeginObject.Value);
-                writer.Write(Token.CarriageReturn.Value);
-                writer.Write(Token.LineFeed.Value);
+                writer.Write(Token.NewLine.Value);
                 var count = actions.Count;
                 for (var i = 0; i < count; i++)
                 {
@@ -119,18 +118,16 @@ namespace JsonSlicer
                     if (i != count - 1)
                     {
                         writer.Write(Token.ValueSeparator.Value);
-                        writer.Write(Token.CarriageReturn.Value);
-                        writer.Write(Token.LineFeed.Value);
+                        writer.Write(Token.NewLine.Value);
                     }
                 }
 
-                writer.Write(Token.CarriageReturn.Value);
-                writer.Write(Token.LineFeed.Value);
+                writer.Write(Token.NewLine.Value);
                 writer.Write(Token.EndObject.Value);
                 await writer.FlushAsync().ConfigureAwait(false);
             }
 
-            return new TypeSerializer((o, pw) => Serializer((T)o, pw));
+            return new TypeSerializer((o, pw) => Serializer((T) o, pw));
         }
 
         private static JsonWriter.WriteDelegate<T> GetObjectWriter<T, VE>(Type pt, VE ve)
@@ -145,28 +142,29 @@ namespace JsonSlicer
                 var makeActionMI =
                     typeof(TypeSerializer).GetMethod("MakeAction", BindingFlags.NonPublic | BindingFlags.Static);
                 var makeAction = makeActionMI.MakeGenericMethod(typeof(T), propType, typeof(VE));
-                action = (JsonWriter.WriteDelegate<T>)makeAction.Invoke(null, new object[] { ve });
+                action = (JsonWriter.WriteDelegate<T>) makeAction.Invoke(null, new object[] {ve});
             }
             else if (propType.IsArray)
             {
                 var makeActionMI =
                     typeof(TypeSerializer).GetMethod("MakeArrayAction", BindingFlags.NonPublic | BindingFlags.Static);
                 var makeAction = makeActionMI.MakeGenericMethod(typeof(T), propType, typeof(VE));
-                action = (JsonWriter.WriteDelegate<T>)makeAction.Invoke(null, new object[] { ve });
+                action = (JsonWriter.WriteDelegate<T>) makeAction.Invoke(null, new object[] {ve});
             }
             else if (typeof(IEnumerable).IsAssignableFrom(propType))
             {
                 var makeActionMI =
-                    typeof(TypeSerializer).GetMethod("MakeEnumerableAction", BindingFlags.NonPublic | BindingFlags.Static);
+                    typeof(TypeSerializer).GetMethod("MakeEnumerableAction",
+                        BindingFlags.NonPublic | BindingFlags.Static);
                 var makeAction = makeActionMI.MakeGenericMethod(typeof(T), propType, typeof(VE));
-                action = (JsonWriter.WriteDelegate<T>)makeAction.Invoke(null, new object[] { ve });
+                action = (JsonWriter.WriteDelegate<T>) makeAction.Invoke(null, new object[] {ve});
             }
             else
             {
                 var makeActionMI =
                     typeof(TypeSerializer).GetMethod("MakeAction", BindingFlags.NonPublic | BindingFlags.Static);
                 var makeAction = makeActionMI.MakeGenericMethod(typeof(T), propType, typeof(VE));
-                action = (JsonWriter.WriteDelegate<T>)makeAction.Invoke(null, new object[] { ve });
+                action = (JsonWriter.WriteDelegate<T>) makeAction.Invoke(null, new object[] {ve});
             }
 
             if (checkNull)
@@ -212,7 +210,8 @@ namespace JsonSlicer
             };
         }
 
-        private static JsonWriter.WriteDelegate<T> MakeEnumerableAction<T, V, VE>(VE ve) where VE : IValueExtractorFactory<T>
+        private static JsonWriter.WriteDelegate<T> MakeEnumerableAction<T, V, VE>(VE ve)
+            where VE : IValueExtractorFactory<T>
         {
             var valFunc = ve.ValueExtractor<V>();
             var valWRiter = GetEnumerableWriter<V>();
@@ -256,16 +255,16 @@ namespace JsonSlicer
             if (writerMethod is null)
             {
                 writerMethod = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .FirstOrDefault(m => m.Name == "WriteObject" &&
-                                     m.IsGenericMethod &&
-                                     m.GetGenericArguments().Length == 1);
+                    .FirstOrDefault(m => m.Name == "WriteObject" &&
+                                         m.IsGenericMethod &&
+                                         m.GetGenericArguments().Length == 1);
 
                 writerMethod = writerMethod.MakeGenericMethod(typeof(T));
-                return (JsonWriter.WriteDelegate<T>)writerMethod.CreateDelegate(typeof(JsonWriter.WriteDelegate<T>));
+                return (JsonWriter.WriteDelegate<T>) writerMethod.CreateDelegate(typeof(JsonWriter.WriteDelegate<T>));
             }
             else
-            { 
-                var @delegate = (Action<T, PipeWriter>)writerMethod.CreateDelegate(typeof(Action<T, PipeWriter>));
+            {
+                var @delegate = (Action<T, PipeWriter>) writerMethod.CreateDelegate(typeof(Action<T, PipeWriter>));
                 return (t, pw) =>
                 {
                     @delegate.Invoke(t, pw);
@@ -278,9 +277,10 @@ namespace JsonSlicer
         {
             var originalType = typeof(T);
             var elementType = originalType.GetElementType();
-            var valueWriterGeneric = typeof(TypeSerializer).GetMethod("GetWriter", BindingFlags.NonPublic | BindingFlags.Static);
+            var valueWriterGeneric =
+                typeof(TypeSerializer).GetMethod("GetWriter", BindingFlags.NonPublic | BindingFlags.Static);
             var valueWriterGenerator = valueWriterGeneric.MakeGenericMethod(elementType);
-            var valueWriter = valueWriterGenerator.Invoke(null, new object[]{});
+            var valueWriter = valueWriterGenerator.Invoke(null, new object[] { });
 
             var arrayWriterGeneric = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Static)
                 .FirstOrDefault(m => m.Name == "WriteArray" &&
@@ -308,12 +308,13 @@ namespace JsonSlicer
         private static JsonWriter.WriteDelegate<T> GetEnumerableWriter<T>()
         {
             var originalType = typeof(T);
-            var valueWriterGeneric = typeof(TypeSerializer).GetMethod("GetWriter", BindingFlags.NonPublic | BindingFlags.Static);
+            var valueWriterGeneric =
+                typeof(TypeSerializer).GetMethod("GetWriter", BindingFlags.NonPublic | BindingFlags.Static);
             var elementType = originalType.IsGenericType ? originalType.GenericTypeArguments.First() : typeof(object);
 
             var enumerableType = originalType == typeof(IEnumerable) ? typeof(IEnumerable<object>) : originalType;
             var valueWriterGenerator = valueWriterGeneric.MakeGenericMethod(elementType);
-            var valueWriter = valueWriterGenerator.Invoke(null, new object[]{});
+            var valueWriter = valueWriterGenerator.Invoke(null, new object[] { });
 
             var enumerableWriterGeneric = typeof(JsonWriter).GetMethods(BindingFlags.Public | BindingFlags.Static)
                 .FirstOrDefault(m => m.Name == "WriteEnumerable" &&
@@ -517,7 +518,7 @@ namespace JsonSlicer
 
             public Token(byte value)
             {
-                Value = new[] { value };
+                Value = new[] {value};
             }
 
             public Token(byte[] value)
@@ -540,11 +541,12 @@ namespace JsonSlicer
             public static readonly Token HorizontalTab = new Token(0x09);
             public static readonly Token LineFeed = new Token(0x0A);
             public static readonly Token CarriageReturn = new Token(0x0D);
+            public static readonly Token NewLine = new Token(Encoding.UTF8.GetBytes(Environment.NewLine));
 
             public static readonly Token StringDelimiter = new Token(0x22);
-            public static readonly Token False = new Token(new byte[] { 0x66, 0x61, 0x6C, 0x73, 0x65 });
-            public static readonly Token True = new Token(new byte[] { 0x74, 0x72, 0x75, 0x65 });
-            public static readonly Token Null = new Token(new byte[] { 0x6E, 0x75, 0x6C, 0x6C });
+            public static readonly Token False = new Token(new byte[] {0x66, 0x61, 0x6C, 0x73, 0x65});
+            public static readonly Token True = new Token(new byte[] {0x74, 0x72, 0x75, 0x65});
+            public static readonly Token Null = new Token(new byte[] {0x6E, 0x75, 0x6C, 0x6C});
         }
 
         public struct Property
@@ -568,7 +570,7 @@ namespace JsonSlicer
         ValueTask Write(object o, PipeWriter writer);
     }
 
-    public interface IJsonWriter<T>: IJsonWriter
+    public interface IJsonWriter<T> : IJsonWriter
     {
         ValueTask Write(T t, PipeWriter writer);
     }
@@ -577,17 +579,18 @@ namespace JsonSlicer
     {
         public static MethodInfo GenericGenerate =
             typeof(JsonWriterGenerator).GetMethod(nameof(Generate), BindingFlags.Instance | BindingFlags.Public);
+
         public IJsonWriter Generate(Type t)
         {
             var mi = GenericGenerate.MakeGenericMethod(t);
-            return (IJsonWriter)mi.Invoke(this, new object[]{});
+            return (IJsonWriter) mi.Invoke(this, new object[] { });
         }
 
         public IJsonWriter<T> Generate<T>()
         {
             var serializedType = typeof(T).FullName;
             var serializerType = $"JsonWriter_{typeof(T).Name}_{Math.Abs(serializedType.GetHashCode())}";
-            var tree = SyntaxFactory.ParseCompilationUnit($@"
+            var c = $@"
 namespace JsonSlicer.GeneratedSerializers 
 {{
   using global::System.Buffers;
@@ -605,31 +608,28 @@ namespace JsonSlicer.GeneratedSerializers
         return default; 
     }}
   }}
-}}", 0, new CSharpParseOptions(LanguageVersion.CSharp7_3, DocumentationMode.None, SourceCodeKind.Regular)).SyntaxTree;
-            var trustedAssembliesPaths = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")).Split(Path.PathSeparator);
-            var systemAssemblies = new[]
-            {
-                "System.Runtime",
-                "mscorlib"
-            };
-            var systemAssembliesLocations = systemAssemblies
-                .Select(a => trustedAssembliesPaths.First(p => Path.GetFileNameWithoutExtension(p) == a));
-            var assemblyName = serializedType;
+}}";
+            var cSharpParseOptions = new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.None, SourceCodeKind.Regular);
+            var tree = SyntaxFactory.ParseCompilationUnit(c, 0, cSharpParseOptions).SyntaxTree;
+
+            var systemAssembliesLocations = GetNetCoreSystemAssemblies();
             var references = systemAssembliesLocations.Concat(new[]
             {
-                typeof(PipeWriter).GetTypeInfo().Assembly.Location,
-                typeof(T).GetTypeInfo().Assembly.Location,
+                typeof(Pipe).GetTypeInfo().Assembly.Location,
+                typeof(BuffersExtensions).GetTypeInfo().Assembly.Location,
                 typeof(IJsonWriter<>).GetTypeInfo().Assembly.Location,
-                typeof(System.Buffers.BuffersExtensions).GetTypeInfo().Assembly.Location,
-            }).Select(al => MetadataReference.CreateFromFile(al));
+                typeof(T).GetTypeInfo().Assembly.Location,
+            })
+            .Select(al => MetadataReference.CreateFromFile(al));
 
             var compilation = CSharpCompilation.Create(
-                assemblyName,
+                serializedType,
                 new[] {tree},
                 references,
                 new CSharpCompilationOptions(
                     outputKind: OutputKind.DynamicallyLinkedLibrary,
-                    optimizationLevel: OptimizationLevel.Release));
+                    optimizationLevel: OptimizationLevel.Debug,
+                    platform: Platform.AnyCpu));
 
             Assembly assembly = null;
             using (var ms = new MemoryStream())
@@ -637,18 +637,39 @@ namespace JsonSlicer.GeneratedSerializers
                 var er = compilation.Emit(ms);
                 if (er.Success)
                 {
+                    ms.Seek(0, SeekOrigin.Begin);
                     assembly = System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromStream(ms);
                 }
                 else
                 {
                     throw new ApplicationException(
-                        string.Join(Environment.NewLine, er.Diagnostics.Select(d => d.ToString())) + 
+                        string.Join(Environment.NewLine, er.Diagnostics.Select(d => d.ToString())) +
                         Environment.NewLine + "===============" + Environment.NewLine +
                         tree.GetText());
                 }
             }
 
-            return (IJsonWriter<T>)Activator.CreateInstance(assembly.DefinedTypes.First());
+            return (IJsonWriter<T>) Activator.CreateInstance(assembly.DefinedTypes.First());
+        }
+
+        private static IEnumerable<string> GetNetCoreSystemAssemblies()
+        {
+            var trustedAssembliesPaths =
+                ((string) AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")).Split(Path.PathSeparator);
+            var systemAssemblies = new[]
+            {
+//                "mscorlib",
+//                "System",
+//                "System.Core",
+                "System.Runtime",
+                "System.Private.CoreLib",
+//                "System.Threading.Tasks",
+                "System.Threading.Tasks.Extensions"
+            };
+            var systemAssembliesLocations = systemAssemblies
+                .Select(a => trustedAssembliesPaths.FirstOrDefault(p => Path.GetFileNameWithoutExtension(p) == a))
+                .Where(x => x != null);
+            return systemAssembliesLocations;
         }
     }
 }

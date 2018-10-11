@@ -64,8 +64,10 @@ namespace JsonSlicerTests
         {
             Pipe pipe = new Pipe();
             var writer = new JsonWriterGenerator().Generate<NestedB>();
+            var readTask = Read(pipe);
             await writer.Write(null, pipe.Writer);
-            var json = await Read(pipe);
+            pipe.Writer.Complete();
+            var json = await readTask;
             Assert.AreEqual("test", json);
 
         }
