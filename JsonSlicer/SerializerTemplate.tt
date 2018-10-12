@@ -9,18 +9,18 @@ namespace JsonSlicer.GeneratedSerializers
   using global::System.Buffers;
   using static global::JsonSlicer.JsonWriter;
 
-  public class <#= SerializerName #> : global::JsonSlicer.IJsonWriter<global::<#= SerializedType.FullName #>>
+  public class <#= SerializerName #> : global::JsonSlicer.IJsonWriter<<#= SerializedTypePath #>>
   {
     public global::System.Threading.Tasks.ValueTask Write(object obj, System.IO.Pipelines.PipeWriter pipeWriter)
     {
-		if(obj is global::<#= SerializedType.FullName #> casted)
+		if(obj is <#= SerializedTypePath #> casted)
 			Write(casted, pipeWriter);
 		else
 			throw new System.ArgumentException($"Expected obj to be of type <#= SerializedType.FullName #> but received {obj.GetType()}");
         return default; 
     }
 
-    public global::System.Threading.Tasks.ValueTask Write(global::<#= SerializedType.FullName #> obj, System.IO.Pipelines.PipeWriter pipeWriter)
+    public global::System.Threading.Tasks.ValueTask Write(global::<#= SerializedTypePath #> obj, System.IO.Pipelines.PipeWriter pipeWriter)
     {
 		<# WriteTemplate(SerializedType); #>
     }

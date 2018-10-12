@@ -6,75 +6,53 @@ using System.Collections.Concurrent;
 using System.IO.Pipelines;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Runtime.Serialization;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace JsonSlicer
 {
-    public static class JsonWriter
+    public class JsonPrimitiveWriter:
+        IJsonWriter,
+        IJsonWriter<string>,
+        IJsonWriter<byte>,
+        IJsonWriter<short>,
+        IJsonWriter<int>,
+        IJsonWriter<long>,
+        IJsonWriter<float>,
+        IJsonWriter<double>,
+        IJsonWriter<decimal>,
+        IJsonWriter<bool>
     {
+        public static JsonPrimitiveWriter Instance = new JsonPrimitiveWriter();
+        
         private static readonly ConcurrentDictionary<Type, IJsonWriter> Serializers =
             new ConcurrentDictionary<Type, IJsonWriter>();
-
         private static readonly ThreadLocal<Encoder> UTF8Enc =
             new ThreadLocal<Encoder>(() => Encoding.UTF8.GetEncoder());
 
-        public static ValueTask WriteObject<T>(T t, PipeWriter writer)
+        public ValueTask Write(object _, PipeWriter writer)
         {
-            var serializer = Serializers.GetOrAdd(typeof(T), _ => new JsonWriterGenerator().Generate<T>());
-            return serializer.Write(t, writer);
+            Write(Token.EmptyObject, writer);
+            return default;
         }
 
-        public static async ValueTask WriteArray<T, TValWriter>(T[] a, PipeWriter writer, TValWriter valueWriter)
-            where TValWriter: IJsonWriter<T>
-        {
-            WritePrimitive(Token.BeginArray, writer);
-
-            for (var i = 0; i < a.Length; i++)
-            {
-                await valueWriter.Write(a[i], writer).ConfigureAwait(false);
-                if (i != a.Length - 1)
-                {
-                    WritePrimitive(Token.ValueSeparator, writer);
-                }
-            }
-
-            WritePrimitive(Token.EndArray, writer);
-        }
-
-        public static async ValueTask WriteEnumerable<E, T, TValWriter>(E e, PipeWriter writer, TValWriter valueWriter)
-            where E : IEnumerable
-            where TValWriter : IJsonWriter<T>
-        {
-            writer.Write(Token.BeginArray.Value);
-            var te = e.OfType<T>();
-            var count = te.Count();
-            foreach (var v in te)
-            {
-                await valueWriter.Write(v, writer).ConfigureAwait(false);
-                if (--count > 0)
-                {
-                    writer.Write(Token.ValueSeparator.Value);
-                }
-            }
-
-            writer.Write(Token.EndArray.Value);
-        }
-
-        public static void WritePrimitive(Token t, PipeWriter writer)
+        public ValueTask Write(Token t, PipeWriter writer)
         {
             writer.Write(t.Value);
+            return default;
         }
 
-        public static void WritePrimitive(Property t, PipeWriter writer)
+        public ValueTask Write(Property t, PipeWriter writer)
         {
-            WritePrimitive(t.QuotedPropertyNameWithSeparator, writer);
+            Write(t.QuotedPropertyNameWithSeparator, writer);
+            return default;
         }
 
-        public static void WritePrimitive(string text, PipeWriter writer)
+        public ValueTask Write(string text, PipeWriter writer)
         {
-            WritePrimitive(Token.StringDelimiter, writer);
+            Write(Token.StringDelimiter, writer);
             int totalCharsWritten = 0, charsWritten = 0;
             int totalBytesWritten = 0, bytesWritten = 0;
             var completed = false;
@@ -102,13 +80,15 @@ namespace JsonSlicer
                         writer.Advance(bytesWritten);
                     } while (!completed);
                 }
+
             }
 
             UTF8Enc.Value.Reset();
-            WritePrimitive(Token.StringDelimiter, writer);
+            Write(Token.StringDelimiter, writer);
+            return default;
         }
 
-        public static void WritePrimitive(decimal dec, PipeWriter writer)
+        public ValueTask Write(decimal dec, PipeWriter writer)
         {
             var mem = writer.GetSpan(64);
             _ = Utf8Formatter.TryFormat(dec, mem, out var bytesWritten)
@@ -116,9 +96,10 @@ namespace JsonSlicer
                 : throw new ArgumentException(
                     $"Too long decimal {dec}");
             writer.Advance(bytesWritten);
+            return default;
         }
 
-        public static void WritePrimitive(double dbl, PipeWriter writer)
+        public ValueTask Write(double dbl, PipeWriter writer)
         {
             var mem = writer.GetSpan();
             _ = Utf8Formatter.TryFormat(dbl, mem, out var bytesWritten)
@@ -126,9 +107,10 @@ namespace JsonSlicer
                 : throw new ArgumentException(
                     $"Too long double {dbl}");
             writer.Advance(bytesWritten);
+            return default;
         }
 
-        public static void WritePrimitive(float flt, PipeWriter writer)
+        public ValueTask Write(float flt, PipeWriter writer)
         {
             var mem = writer.GetSpan(64);
             _ = Utf8Formatter.TryFormat(flt, mem, out var bytesWritten)
@@ -136,9 +118,10 @@ namespace JsonSlicer
                 : throw new ArgumentException(
                     $"Too long float {flt}");
             writer.Advance(bytesWritten);
+            return default;
         }
 
-        public static void WritePrimitive(int intg, PipeWriter writer)
+        public ValueTask Write(int intg, PipeWriter writer)
         {
             var mem = writer.GetSpan(32);
             _ = Utf8Formatter.TryFormat(intg, mem, out var bytesWritten)
@@ -146,9 +129,10 @@ namespace JsonSlicer
                 : throw new ArgumentException(
                     $"Too long int {intg}");
             writer.Advance(bytesWritten);
+            return default;
         }
 
-        public static void WritePrimitive(long lng, PipeWriter writer)
+        public ValueTask Write(long lng, PipeWriter writer)
         {
             var mem = writer.GetSpan(64);
             _ = Utf8Formatter.TryFormat(lng, mem, out var bytesWritten)
@@ -156,9 +140,10 @@ namespace JsonSlicer
                 : throw new ArgumentException(
                     $"Too long long {lng}");
             writer.Advance(bytesWritten);
+            return default;
         }
 
-        public static void WritePrimitive(short sht, PipeWriter writer)
+        public ValueTask Write(short sht, PipeWriter writer)
         {
             var mem = writer.GetSpan(8);
             _ = Utf8Formatter.TryFormat(sht, mem, out var bytesWritten)
@@ -166,9 +151,10 @@ namespace JsonSlicer
                 : throw new ArgumentException(
                     $"Too long short {sht}");
             writer.Advance(bytesWritten);
+            return default;
         }
 
-        public static void WritePrimitive(byte bt, PipeWriter writer)
+        public ValueTask Write(byte bt, PipeWriter writer)
         {
             var mem = writer.GetSpan(4);
             _ = Utf8Formatter.TryFormat(bt, mem, out var bytesWritten)
@@ -176,11 +162,13 @@ namespace JsonSlicer
                 : throw new ArgumentException(
                     $"Too long short {bt}");
             writer.Advance(bytesWritten);
+            return default;
         }
 
-        public static void WritePrimitive(bool bl, PipeWriter writer)
+        public ValueTask Write(bool bl, PipeWriter writer)
         {
             writer.Write(bl ? Token.True.Value : Token.False.Value);
+            return default;
         }
     }
 }

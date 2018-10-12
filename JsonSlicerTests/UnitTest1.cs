@@ -16,6 +16,24 @@ namespace JsonSlicerTests
     [TestFixture]
     public class UnitTest1
     {
+        private static readonly string ExpectedTestObjectJson = $@"{{
+    ""String"": ""{new string('ক', 40)}"",
+    ""NullString"": null,
+    ""Decimal"": {decimal.MaxValue},
+    ""Nested"": {{
+        ""Short"": {short.MinValue},
+        ""ArrayBytes"": [1,2,3],
+        ""ListFloats"": [1,2,3,-4.99999,{float.MaxValue.ToString(CultureInfo.InvariantCulture)},{float.MinValue.ToString(CultureInfo.InvariantCulture)}]
+    }},
+    ""Double"": {double.MaxValue.ToString(CultureInfo.InvariantCulture)},
+    ""NullNested"": null,
+    ""ArrayList"": [1,""bla"",{{
+        ""SmallNested"": 1,
+        ""BoolTrue"": true,
+        ""BoolFalse"": false
+    }}]
+}}";
+
         [Test]
         public async Task Test1()
         {
@@ -29,23 +47,7 @@ namespace JsonSlicerTests
 
 
             var actual = json.ToString();
-            Assert.AreEqual($@"{{
-""String"": ""{new string('ক', 40)}"",
-""NullString"": null,
-""Decimal"": {decimal.MaxValue},
-""Nested"": {{
-""Short"": {short.MinValue},
-""ArrayBytes"": [1,2,3],
-""ListFloats"": [1,2,3,-4.99999,{float.MaxValue.ToString(CultureInfo.InvariantCulture)},{float.MinValue.ToString(CultureInfo.InvariantCulture)}]
-}},
-""Double"": {double.MaxValue.ToString(CultureInfo.InvariantCulture)},
-""NullNested"": null,
-""ArrayList"": [1,""bla"",{{
-""SmallNested"": 1,
-""BoolTrue"": true,
-""BoolFalse"": false
-}}]
-}}", actual);
+            Assert.AreEqual(ExpectedTestObjectJson, actual);
         }
 
         [Test]
@@ -63,31 +65,39 @@ namespace JsonSlicerTests
         public async Task RoslynGeneration()
         {
             Pipe pipe = new Pipe();
-            var writer = new JsonWriterGenerator().Generate<string>();
+            var writer = new JsonWriterGenerator().Generate<TestObj>();
+            var testObj = GetTestObject();
             var readTask = Read(pipe);
-            await writer.Write("test", pipe.Writer);
+            await writer.Write(testObj, pipe.Writer);
             pipe.Writer.Complete();
             var json = await readTask;
             Assert.AreEqual("test", json);
         }
 
-        private static TestObj GetTestObject(bool arrayList = true)
+        [Test]
+        [TestCase(1, "1", typeof(int))]
+        [TestCase(1.1, "1.1", typeof(double))]
+        [TestCase(-1.1f, "-1.1", typeof(float))]
+        [TestCase(-1.1, "-1.1", typeof(decimal))]
+        [TestCase((byte)3, "3", typeof(byte))]
+        [TestCase(12342131l, "12342131", typeof(long))]
+        [TestCase(true, "true", typeof(bool))]
+        [TestCase(false, "false", typeof(bool))]
+        [TestCase(null, "null", typeof(string))]
+        [TestCase("blabla", "\"blabla\"", typeof(string))]
+        public async Task SerializesPrimitiveTypes(object toBeSerialized, string expected, Type type)
         {
-            var to = new TestObj()
+            Pipe pipe = new Pipe();
+            var writer = new JsonWriterGenerator().Generate(type);
+            var readTask = Read(pipe);
+            if (toBeSerialized?.GetType() != type)
             {
-                String = new string('ক', 40),
-                Decimal = decimal.MaxValue,
-                Double = double.MaxValue,
-                Nested = new Nested
-                {
-                    Short = short.MinValue,
-                    ArrayBytes = new byte[] {1, 2, 3 },
-                    ListFloats = new List<float> { 1.0f, 2.0f, 3.0f, -4.99999f, float.MaxValue, float.MinValue}
-                },
-            };
-            if (arrayList)
-                to.ArrayList = new ArrayList() {1, "bla", new SmallNestedType {SmallNested = 1}};
-            return to;
+                toBeSerialized = Convert.ChangeType(toBeSerialized, type);
+            }
+            await writer.Write(toBeSerialized, pipe.Writer);
+            pipe.Writer.Complete();
+            var json = await readTask;
+            Assert.AreEqual(expected, json.ToString());
         }
 
         [Test]
@@ -134,6 +144,25 @@ namespace JsonSlicerTests
 
             pipe.Reader.Complete();
             return json;
+        }
+
+        private static TestObj GetTestObject(bool arrayList = true)
+        {
+            var to = new TestObj()
+            {
+                String = new string('ক', 40),
+                Decimal = decimal.MaxValue,
+                Double = double.MaxValue,
+                Nested = new Nested
+                {
+                    Short = short.MinValue,
+                    ArrayBytes = new byte[] {1, 2, 3 },
+                    ListFloats = new List<float> { 1.0f, 2.0f, 3.0f, -4.99999f, float.MaxValue, float.MinValue}
+                },
+            };
+            if (arrayList)
+                to.ArrayList = new ArrayList() {1, "bla", new SmallNestedType {SmallNested = 1}};
+            return to;
         }
 
         public class TestObj

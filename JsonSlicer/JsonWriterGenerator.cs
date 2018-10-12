@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipelines;
@@ -12,8 +13,10 @@ namespace JsonSlicer
 {
     public class JsonWriterGenerator
     {
-        public static MethodInfo GenericGenerate =
-            typeof(JsonWriterGenerator).GetMethod(nameof(Generate), BindingFlags.Instance | BindingFlags.Public);
+        private static ConcurrentDictionary<Type, IJsonWriter> generators = new ConcurrentDictionary<Type, IJsonWriter>();
+        
+        public static MethodInfo GenericGenerate = typeof(JsonWriterGenerator)
+            .GetMethod(nameof(Generate), new Type[] { });
 
         public IJsonWriter Generate(Type t)
         {
@@ -23,10 +26,16 @@ namespace JsonSlicer
 
         public IJsonWriter<T> Generate<T>()
         {
+            return generators.GetOrAdd(typeof(T), (_) => GenerateImpl<T>()) as IJsonWriter<T>;
+        }
+
+        private static IJsonWriter<T> GenerateImpl<T>()
+        {
             var serializedType = typeof(T).FullName;
             var template = new SerializerTemplate(typeof(T));
-            var c = template.TransformText();
-            var cSharpParseOptions = new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.None, SourceCodeKind.Regular);
+            var c = template.Template();
+            var cSharpParseOptions =
+                new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.None, SourceCodeKind.Regular);
             var tree = SyntaxFactory.ParseCompilationUnit(c, 0, cSharpParseOptions).SyntaxTree;
 
             var systemAssembliesLocations = GetNetCoreSystemAssemblies();
@@ -59,10 +68,13 @@ namespace JsonSlicer
                 }
                 else
                 {
+                    var sourceWithNumberedLines =
+                        tree.GetText().Lines.Select(l => $"{l.LineNumber}:    {l.Text.ToString(l.Span)}");
                     throw new ApplicationException(
-                        string.Join(Environment.NewLine, er.Diagnostics.Select(d => d.ToString())) +
-                        Environment.NewLine + "===============" + Environment.NewLine +
-                        tree.GetText());
+                        string.Join(Environment.NewLine,
+                            er.Diagnostics.Cast<object>()
+                                .Concat(new[] {"========="})
+                                .Concat(sourceWithNumberedLines)));
                 }
             }
 

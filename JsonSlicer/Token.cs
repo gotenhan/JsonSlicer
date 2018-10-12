@@ -40,5 +40,6 @@ namespace JsonSlicer
             public static readonly Token False = new Token(new byte[] {0x66, 0x61, 0x6C, 0x73, 0x65});
             public static readonly Token True = new Token(new byte[] {0x74, 0x72, 0x75, 0x65});
             public static readonly Token Null = new Token(new byte[] {0x6E, 0x75, 0x6C, 0x6C});
+            public static readonly Token EmptyObject = new Token(new byte[] { 0x7B, 0x7D });
         }
 }

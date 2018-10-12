@@ -36,18 +36,18 @@ namespace JsonSlicer
             
             #line default
             #line hidden
-            this.Write(" : global::JsonSlicer.IJsonWriter<global::");
+            this.Write(" : global::JsonSlicer.IJsonWriter<");
             
             #line 12 "D:\Moje projekty\JsonSlicer\JsonSlicer\JsonSlicer\SerializerTemplate.tt"
-            this.Write(this.ToStringHelper.ToStringWithCulture(SerializedType.FullName));
+            this.Write(this.ToStringHelper.ToStringWithCulture(SerializedTypePath));
             
             #line default
             #line hidden
             this.Write(">\r\n  {\r\n    public global::System.Threading.Tasks.ValueTask Write(object obj, Sys" +
-                    "tem.IO.Pipelines.PipeWriter pipeWriter)\r\n    {\r\n\t\tif(obj is global::");
+                    "tem.IO.Pipelines.PipeWriter pipeWriter)\r\n    {\r\n\t\tif(obj is ");
             
             #line 16 "D:\Moje projekty\JsonSlicer\JsonSlicer\JsonSlicer\SerializerTemplate.tt"
-            this.Write(this.ToStringHelper.ToStringWithCulture(SerializedType.FullName));
+            this.Write(this.ToStringHelper.ToStringWithCulture(SerializedTypePath));
             
             #line default
             #line hidden
@@ -60,10 +60,10 @@ namespace JsonSlicer
             #line default
             #line hidden
             this.Write(" but received {obj.GetType()}\");\r\n        return default; \r\n    }\r\n\r\n    public g" +
-                    "lobal::System.Threading.Tasks.ValueTask Write(global::");
+                    "lobal::System.Threading.Tasks.ValueTask Write(");
             
             #line 23 "D:\Moje projekty\JsonSlicer\JsonSlicer\JsonSlicer\SerializerTemplate.tt"
-            this.Write(this.ToStringHelper.ToStringWithCulture(SerializedType.FullName));
+            this.Write(this.ToStringHelper.ToStringWithCulture(SerializedTypePath));
             
             #line default
             #line hidden
