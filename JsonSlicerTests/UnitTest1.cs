@@ -63,13 +63,12 @@ namespace JsonSlicerTests
         public async Task RoslynGeneration()
         {
             Pipe pipe = new Pipe();
-            var writer = new JsonWriterGenerator().Generate<NestedB>();
+            var writer = new JsonWriterGenerator().Generate<string>();
             var readTask = Read(pipe);
-            await writer.Write(null, pipe.Writer);
+            await writer.Write("test", pipe.Writer);
             pipe.Writer.Complete();
             var json = await readTask;
             Assert.AreEqual("test", json);
-
         }
 
         private static TestObj GetTestObject(bool arrayList = true)
