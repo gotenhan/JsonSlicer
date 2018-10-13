@@ -85,22 +85,27 @@ namespace JsonSlicerTests
         [TestCase(false, "false", typeof(bool))]
         [TestCase(null, "null", typeof(string))]
         [TestCase("blabla", "\"blabla\"", typeof(string))]
-        public async Task SerializesPrimitiveTypes(object toBeSerialized, string expected, Type type)
+        public async Task SerializePrimitives(object toBeSerialized, string expected, Type type)
         {
-            Pipe pipe = new Pipe();
-            var writer = new JsonWriterGenerator().Generate(type);
-            var readTask = Read(pipe);
             if (toBeSerialized?.GetType() != type)
             {
                 toBeSerialized = Convert.ChangeType(toBeSerialized, type);
             }
-            await writer.Write(toBeSerialized, pipe.Writer);
-            pipe.Writer.Complete();
-            var json = await readTask;
+            var json = await SerializeToJson(toBeSerialized, type);
             Assert.AreEqual(expected, json.ToString());
         }
 
         [Test]
+        public async Task SerializeArrayOfPrimitives()
+        {
+            var toBeSerialized = new[] {"a", "b", "abc"};
+            var expected = "[\"a\", \"b\", \"c\"]";
+            var json = await SerializeToJson(toBeSerialized, typeof(string[]));
+            Assert.AreEqual(expected, json);
+        }
+
+        [Test]
+
         public async Task Test2()
         {
             var pipe = new Pipe();
@@ -124,6 +129,17 @@ namespace JsonSlicerTests
             }
 
             pipe.Writer.Complete();
+        }
+
+        private static async Task<StringBuilder> SerializeToJson(object toBeSerialized, Type type)
+        {
+            Pipe pipe = new Pipe();
+            var writer = new JsonWriterGenerator().Generate(type);
+            var readTask = Read(pipe);
+            await writer.Write(toBeSerialized, pipe.Writer);
+            pipe.Writer.Complete();
+            var json = await readTask;
+            return json;
         }
 
         private static async Task<StringBuilder> Read(Pipe pipe)
@@ -200,5 +216,9 @@ namespace JsonSlicerTests
 
             public bool BoolFalse => false;
         }
+
+        private string blabla;
+        private int blabla1;
+        private double sss;
     }
 }

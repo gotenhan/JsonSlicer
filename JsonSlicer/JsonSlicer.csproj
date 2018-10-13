@@ -30,21 +30,4 @@
     <Service Include="{508349b6-6b84-4df5-91f0-309beebad82d}" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Compile Update="SerializerTemplate.cs">
-      <DesignTime>True</DesignTime>
-      <AutoGen>True</AutoGen>
-      <DependentUpon>SerializerTemplate.tt</DependentUpon>
-      <Generator>TextTemplatingFilePreprocessor</Generator>
-      <LastGenOutput>SerializerTemplate.cs</LastGenOutput>
-    </Compile>
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Update="SerializerTemplate.tt">
-      <Generator>TextTemplatingFilePreprocessor</Generator>
-      <LastGenOutput>SerializerTemplate.cs</LastGenOutput>
-    </None>
-  </ItemGroup>
-
 </Project>
