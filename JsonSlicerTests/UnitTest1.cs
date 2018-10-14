@@ -6,10 +6,12 @@ using System.Globalization;
 using System.IO;
 using System.IO.Pipelines;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using JsonSlicer;
 using JsonSlicerBenchmarks.Models;
 using NUnit.Framework;
+using NUnit.Framework.Internal;
 
 namespace JsonSlicerTests
 {
@@ -23,7 +25,8 @@ namespace JsonSlicerTests
     ""Nested"": {{
         ""Short"": {short.MinValue},
         ""ArrayBytes"": [1,2,3],
-        ""ListFloats"": [1,2,3,-4.99999,{float.MaxValue.ToString(CultureInfo.InvariantCulture)},{float.MinValue.ToString(CultureInfo.InvariantCulture)}]
+        ""ListFloats"": [1,2,3,-4.99999,{float.MaxValue.ToString(CultureInfo.InvariantCulture)},{float.MinValue.ToString(CultureInfo.InvariantCulture)}],
+        ""NullNested"": null
     }},
     ""Double"": {double.MaxValue.ToString(CultureInfo.InvariantCulture)},
     ""NullNested"": null,
@@ -33,6 +36,8 @@ namespace JsonSlicerTests
         ""BoolFalse"": false
     }}]
 }}";
+
+        private static readonly string ExpectedTestObjectJsonWithNoLeadingSpaces = Regex.Replace(ExpectedTestObjectJson, @"^\s+", "", RegexOptions.Multiline);
 
         [Test]
         public async Task Test1()
@@ -66,7 +71,7 @@ namespace JsonSlicerTests
         {
             var testObj = GetTestObject();
             var json = await SerializeToJson(testObj, typeof(TestObj));
-            Assert.AreEqual("test", json);
+            Assert.AreEqual(ExpectedTestObjectJsonWithNoLeadingSpaces, json);
         }
 
         [Test]
@@ -75,7 +80,7 @@ namespace JsonSlicerTests
         [TestCase(-1.1f, "-1.1", typeof(float))]
         [TestCase(-1.1, "-1.1", typeof(decimal))]
         [TestCase((byte)3, "3", typeof(byte))]
-        [TestCase(12342131l, "12342131", typeof(long))]
+        [TestCase(12342131L, "12342131", typeof(long))]
         [TestCase(true, "true", typeof(bool))]
         [TestCase(false, "false", typeof(bool))]
         [TestCase(null, "null", typeof(string))]
@@ -246,6 +251,8 @@ namespace JsonSlicerTests
             public byte[] ArrayBytes { get; set; }
 
             public List<float> ListFloats { get; set; }
+
+            public Nested NullNested => null;
         }
 
         public struct SmallNestedType

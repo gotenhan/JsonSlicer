@@ -14,7 +14,7 @@ namespace JsonSlicer
 {
     public class JsonWriterGenerator
     {
-        private static readonly ConcurrentDictionary<Type, IJsonWriter> generators = new ConcurrentDictionary<Type, IJsonWriter>();
+        private static readonly ConcurrentDictionary<Type, ValueTuple<IJsonWriter, byte[]>> Generators = new ConcurrentDictionary<Type, ValueTuple<IJsonWriter, byte[]>>();
         
         private static readonly MethodInfo GenericGenerate = typeof(JsonWriterGenerator)
             .GetMethod(nameof(Generate), new Type[] { });
@@ -27,26 +27,27 @@ namespace JsonSlicer
 
         public static IJsonWriter<T> Generate<T>()
         {
-            return generators.GetOrAdd(typeof(T), (_) => GenerateImpl<T>()) as IJsonWriter<T>;
+            var tuple = Generators.GetOrAdd(typeof(T), _ => GenerateImpl<T>());
+            return tuple.Item1 as IJsonWriter<T>;
         }
 
-        private static IJsonWriter<T> GenerateImpl<T>()
+        private static (IJsonWriter<T>, byte[]) GenerateImpl<T>()
         {
             var serializerTemplate = new SerializerTemplate(typeof(T));
-            var c = serializerTemplate.Generate();
+            var serializer = serializerTemplate.Generate();
             var cSharpParseOptions =
-                new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.None, SourceCodeKind.Regular);
+                new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.Parse, SourceCodeKind.Regular);
 #if DEBUG
             var serializerName = serializerTemplate.SerializerName;
             var csPath = Path.GetFullPath(serializerName + ".cs");
-            File.WriteAllBytes(csPath, Encoding.UTF8.GetBytes(c));
-            var tree = SyntaxFactory.ParseSyntaxTree(c, cSharpParseOptions, csPath, Encoding.UTF8);
+            File.WriteAllText(csPath, serializer.Text, Encoding.UTF8);
+            var tree = SyntaxFactory.ParseSyntaxTree(serializer.Text, cSharpParseOptions, csPath, Encoding.UTF8);
 #else
             var tree = SyntaxFactory.ParseCompilationUnit(c, 0, cSharpParseOptions).SyntaxTree;
 #endif
 
             var systemAssembliesLocations = GetNetCoreSystemAssemblies();
-            var references = systemAssembliesLocations.Concat(new[]
+            var commonReferences = systemAssembliesLocations.Concat(new[]
                 {
                     typeof(Pipe).GetTypeInfo().Assembly.Location,
                     typeof(BuffersExtensions).GetTypeInfo().Assembly.Location,
@@ -54,6 +55,8 @@ namespace JsonSlicer
                     typeof(T).GetTypeInfo().Assembly.Location,
                 })
                 .Select(al => MetadataReference.CreateFromFile(al));
+            var typeSpecificReferences = 
+                serializer.ReferencedTypes.Select(GetMetadataReferenceForType);
 
             var cSharpCompilationOptions = new CSharpCompilationOptions(
                 outputKind: OutputKind.DynamicallyLinkedLibrary,
@@ -62,7 +65,7 @@ namespace JsonSlicer
             var compilation = CSharpCompilation.Create(
                 serializerTemplate.SerializerName,
                 new[] {tree},
-                references,
+                commonReferences.Concat(typeSpecificReferences),
                 cSharpCompilationOptions);
 
             Assembly assembly = null;
@@ -96,9 +99,28 @@ namespace JsonSlicer
             }
 #else
             assembly = System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromAssemblyPath(dllPath);
+            var assemblyBytes = File.ReadAllBytes(dllPath);
 #endif
 
-            return (IJsonWriter<T>) Activator.CreateInstance(assembly.DefinedTypes.First());
+            var writer = (IJsonWriter<T>) Activator.CreateInstance(assembly.DefinedTypes.First());
+            return (writer, assemblyBytes);
+
+            PortableExecutableReference GetMetadataReferenceForType(Type t)
+            {
+                if (Generators.TryGetValue(t, out var generator))
+                {
+                    return MetadataReference.CreateFromImage(generator.Item2);
+                }
+                else if (!string.IsNullOrEmpty(t.GetTypeInfo().Assembly.Location))
+                {
+                    return MetadataReference.CreateFromFile(t.GetTypeInfo().Assembly.Location);
+                }
+                else
+                {
+                    throw new ApplicationException(
+                        $"Serializer for {typeof(T).FullName} requires serializer for {t.FullName}, but it was not generated");
+                }
+            }
         }
 
         private static IEnumerable<string> GetNetCoreSystemAssemblies()
@@ -113,6 +135,7 @@ namespace JsonSlicer
                 "System.Runtime",
                 "System.Private.CoreLib",
              "netstandard",
+             "System.Collections",
 //                "System.Threading.Tasks",
                 "System.Threading.Tasks.Extensions"
             };
