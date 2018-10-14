@@ -99,7 +99,7 @@ namespace JsonSlicerTests
         public async Task SerializeArrayOfPrimitives()
         {
             var toBeSerialized = new[] {"a", "b", "abc"};
-            var expected = "[\"a\", \"b\", \"c\"]";
+            var expected = "[\"a\",\"b\",\"abc\"]";
             var json = await SerializeToJson(toBeSerialized, typeof(string[]));
             Assert.AreEqual(expected, json);
         }
