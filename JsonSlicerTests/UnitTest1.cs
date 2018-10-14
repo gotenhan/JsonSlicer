@@ -131,7 +131,7 @@ namespace JsonSlicerTests
             pipe.Writer.Complete();
         }
 
-        private static async Task<StringBuilder> SerializeToJson(object toBeSerialized, Type type)
+        private static async Task<string> SerializeToJson(object toBeSerialized, Type type)
         {
             Pipe pipe = new Pipe();
             var writer = new JsonWriterGenerator().Generate(type);
@@ -139,7 +139,7 @@ namespace JsonSlicerTests
             await writer.Write(toBeSerialized, pipe.Writer);
             pipe.Writer.Complete();
             var json = await readTask;
-            return json;
+            return json.ToString();
         }
 
         private static async Task<StringBuilder> Read(Pipe pipe)
