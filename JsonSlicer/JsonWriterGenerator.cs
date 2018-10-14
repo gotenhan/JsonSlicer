@@ -14,18 +14,18 @@ namespace JsonSlicer
 {
     public class JsonWriterGenerator
     {
-        private static ConcurrentDictionary<Type, IJsonWriter> generators = new ConcurrentDictionary<Type, IJsonWriter>();
+        private static readonly ConcurrentDictionary<Type, IJsonWriter> generators = new ConcurrentDictionary<Type, IJsonWriter>();
         
-        public static MethodInfo GenericGenerate = typeof(JsonWriterGenerator)
+        private static readonly MethodInfo GenericGenerate = typeof(JsonWriterGenerator)
             .GetMethod(nameof(Generate), new Type[] { });
 
-        public IJsonWriter Generate(Type t)
+        public static IJsonWriter Generate(Type t)
         {
             var mi = GenericGenerate.MakeGenericMethod(t);
-            return (IJsonWriter) mi.Invoke(this, new object[] { });
+            return (IJsonWriter) mi.Invoke(null, new object[] { });
         }
 
-        public IJsonWriter<T> Generate<T>()
+        public static IJsonWriter<T> Generate<T>()
         {
             return generators.GetOrAdd(typeof(T), (_) => GenerateImpl<T>()) as IJsonWriter<T>;
         }
@@ -82,7 +82,8 @@ namespace JsonSlicer
                         tree.GetText().Lines.Select(l => $"{l.LineNumber}:    {l.Text.ToString(l.Span)}");
                     throw new ApplicationException(
                         string.Join(Environment.NewLine,
-                            er.Diagnostics.Cast<object>()
+                            er.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)
+                                .Cast<object>()
                                 .Concat(new[] {"========="})
                                 .Concat(sourceWithNumberedLines)));
                 }

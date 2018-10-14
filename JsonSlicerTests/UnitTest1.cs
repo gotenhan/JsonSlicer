@@ -62,15 +62,10 @@ namespace JsonSlicerTests
         }
 
         [Test]
-        public async Task RoslynGeneration()
+        public async Task SerializeComplexObjectHierarchy ()
         {
-            Pipe pipe = new Pipe();
-            var writer = new JsonWriterGenerator().Generate<TestObj>();
             var testObj = GetTestObject();
-            var readTask = Read(pipe);
-            await writer.Write(testObj, pipe.Writer);
-            pipe.Writer.Complete();
-            var json = await readTask;
+            var json = await SerializeToJson(testObj, typeof(TestObj));
             Assert.AreEqual("test", json);
         }
 
@@ -134,7 +129,7 @@ namespace JsonSlicerTests
         private static async Task<string> SerializeToJson(object toBeSerialized, Type type)
         {
             Pipe pipe = new Pipe();
-            var writer = new JsonWriterGenerator().Generate(type);
+            var writer = JsonWriterGenerator.Generate(type);
             var readTask = Read(pipe);
             await writer.Write(toBeSerialized, pipe.Writer);
             pipe.Writer.Complete();
