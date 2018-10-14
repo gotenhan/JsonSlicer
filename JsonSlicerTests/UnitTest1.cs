@@ -100,7 +100,52 @@ namespace JsonSlicerTests
         }
 
         [Test]
+        public async Task SerializeEnumerable()
+        {
+            var toBeSerialized = new ArrayList {"a", 1, 2.3};
+            var expected = "[{},{},{}]";
+            var json = await SerializeToJson(toBeSerialized, typeof(IEnumerable));
+            Assert.AreEqual(expected, json);
+        }
 
+        [Test]
+        public async Task SerializeGenericEnumerable()
+        {
+            var toBeSerialized = new List<int> {0, 1, 2};
+            var expected = "[0,1,2]";
+            var json = await SerializeToJson(toBeSerialized, typeof(IEnumerable<int>));
+            Assert.AreEqual(expected, json);
+        }
+
+        [Test]
+        public async Task SerializeEnumerableOfEnumerables()
+        {
+            var toBeSerialized = new List<List<int>>
+            {
+                new List<int> {0, 1},
+                new List<int> {1, 2},
+                new List<int> {2, 3}
+            };
+            var expected = "[[0,1],[1,2],[2,3]]";
+            var json = await SerializeToJson(toBeSerialized, typeof(IEnumerable<IEnumerable<int>>));
+            Assert.AreEqual(expected, json);
+        }
+
+        [Test]
+        public async Task SerializeArrayOfArrays()
+        {
+            var toBeSerialized = new[]
+            {
+                new int[] {0, 1},
+                new int[] {1, 2},
+                new int[] {2, 3}
+            };
+            var expected = "[[0,1],[1,2],[2,3]]";
+            var json = await SerializeToJson(toBeSerialized, typeof(int[][]));
+            Assert.AreEqual(expected, json);
+        }
+
+        [Test]
         public async Task Test2()
         {
             var pipe = new Pipe();
