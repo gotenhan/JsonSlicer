@@ -27,11 +27,11 @@ namespace JsonSlicer
 
         public static IJsonWriter<T> Generate<T>()
         {
-            var tuple = Generators.GetOrAdd(typeof(T), _ => GenerateImpl<T>());
-            return tuple.Item1 as IJsonWriter<T>;
+            var (writer, assemblyBytes) = Generators.GetOrAdd(typeof(T), _ => GenerateImpl<T>());
+            return writer as IJsonWriter<T>;
         }
 
-        private static (IJsonWriter<T>, byte[]) GenerateImpl<T>()
+        private static (IJsonWriter<T> writer, byte[] assemblyBytes) GenerateImpl<T>()
         {
             var serializerTemplate = new SerializerTemplate(typeof(T));
             var serializer = serializerTemplate.Generate();
@@ -43,7 +43,7 @@ namespace JsonSlicer
             File.WriteAllText(csPath, serializer.Text, Encoding.UTF8);
             var tree = SyntaxFactory.ParseSyntaxTree(serializer.Text, cSharpParseOptions, csPath, Encoding.UTF8);
 #else
-            var tree = SyntaxFactory.ParseCompilationUnit(c, 0, cSharpParseOptions).SyntaxTree;
+            var tree = SyntaxFactory.ParseCompilationUnit(serializer.Text, 0, cSharpParseOptions).SyntaxTree;
 #endif
 
             var systemAssembliesLocations = GetNetCoreSystemAssemblies();
@@ -69,6 +69,7 @@ namespace JsonSlicer
                 cSharpCompilationOptions);
 
             Assembly assembly = null;
+            byte[] assemblyBytes = null;
 #if DEBUG
             var dllPath = Path.GetFullPath(serializerName + ".dll");
             var pdbPath = Path.GetFullPath(serializerName + ".pdb");
@@ -94,6 +95,7 @@ namespace JsonSlicer
                 else
                 { 
                     ms.Seek(0, SeekOrigin.Begin);
+                    assemblyBytes = ms.ToArray();
                     assembly = System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromStream(ms);
                 }
             }
@@ -107,9 +109,10 @@ namespace JsonSlicer
 
             PortableExecutableReference GetMetadataReferenceForType(Type t)
             {
-                if (Generators.TryGetValue(t, out var generator))
+                (IJsonWriter _, byte[] assembly) generator;
+                if (Generators.TryGetValue(t, out generator))
                 {
-                    return MetadataReference.CreateFromImage(generator.Item2);
+                    return MetadataReference.CreateFromImage(generator.assembly);
                 }
                 else if (!string.IsNullOrEmpty(t.GetTypeInfo().Assembly.Location))
                 {
