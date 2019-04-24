@@ -18,7 +18,7 @@ namespace JsonSlicer
         private static readonly Type[] KnownTypes = new[]
         {
             typeof(string), typeof(decimal), typeof(double), typeof(float), typeof(int), typeof(long), typeof(short),
-            typeof(byte), typeof(bool), typeof(object)
+            typeof(byte), typeof(bool)
         };
 
         public SerializerTemplate(Type serializedType)
@@ -95,6 +95,28 @@ namespace JsonSlicer.GeneratedSerializers
                 var valueType = type.GetGenericArguments().FirstOrDefault() ?? typeof(object);
                 return WriteEnumerableTemplate(valueType, value, referencedTypes);
             }
+            else if (type == typeof(object))
+            {
+                var realTypeVar = "realType" + Guid.NewGuid().ToString("N");
+                var serializerVar = "serializer" + Guid.NewGuid().ToString("N");
+                return $@"if({value} == null)
+{{
+    global::JsonSlicer.JsonPrimitiveWriter.Instance.Write(Token.Null, pipeWriter);
+}}
+else
+{{
+    var {realTypeVar} = {value}.GetType();
+    if({realTypeVar} == typeof(object))
+    {{
+        global::JsonSlicer.JsonPrimitiveWriter.Instance.Write({value}, pipeWriter);
+    }}
+    else
+    {{
+        var {serializerVar} = global::JsonSlicer.JsonWriterGenerator.Generate({realTypeVar});
+        {serializerVar}.Write({value}, pipeWriter);
+    }}
+}}";
+        }
             else
             {
                 if (topLevel && type == SerializedType)
@@ -169,7 +191,7 @@ namespace JsonSlicer.GeneratedSerializers
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("{");
-            var canBeNull = !type.IsValueType || type.GetGenericTypeDefinition() == typeof(Nullable<>);
+            var canBeNull = !type.IsValueType || (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Nullable<>));
             if (canBeNull)
             {
                 sb.AppendLine($"if ({value} == null) {{");

@@ -413,7 +413,7 @@ namespace JsonSlicer
 
             public static void WritePrimitive(double dbl, PipeWriter writer)
             {
-                var mem = writer.GetSpan();
+                var mem = writer.GetSpan(32);
                 _ = Utf8Formatter.TryFormat(dbl, mem, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(
@@ -423,7 +423,7 @@ namespace JsonSlicer
 
             public static void WritePrimitive(float flt, PipeWriter writer)
             {
-                var mem = writer.GetSpan(64);
+                var mem = writer.GetSpan(32);
                 _ = Utf8Formatter.TryFormat(flt, mem, out var bytesWritten)
                     ? true
                     : throw new ArgumentException(

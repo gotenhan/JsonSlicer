@@ -73,6 +73,8 @@ namespace JsonSlicer
 #if DEBUG
             var dllPath = Path.GetFullPath(serializerName + ".dll");
             var pdbPath = Path.GetFullPath(serializerName + ".pdb");
+            File.Delete(dllPath);
+            File.Delete(pdbPath);
             var er = compilation.Emit(dllPath, pdbPath);
 #else
             using (var ms = new MemoryStream())
@@ -101,7 +103,7 @@ namespace JsonSlicer
             }
 #else
             assembly = System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromAssemblyPath(dllPath);
-            var assemblyBytes = File.ReadAllBytes(dllPath);
+            assemblyBytes = File.ReadAllBytes(dllPath);
 #endif
 
             var writer = (IJsonWriter<T>) Activator.CreateInstance(assembly.DefinedTypes.First());

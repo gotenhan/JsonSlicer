@@ -108,7 +108,7 @@ namespace JsonSlicerTests
         public async Task SerializeEnumerable()
         {
             var toBeSerialized = new ArrayList {"a", 1, 2.3};
-            var expected = "[{},{},{}]";
+            var expected = "[\"a\",1,2.3]";
             var json = await SerializeToJson(toBeSerialized, typeof(IEnumerable));
             Assert.AreEqual(expected, json);
         }
