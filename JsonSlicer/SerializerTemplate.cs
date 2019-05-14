@@ -202,7 +202,11 @@ else
             sb.AppendLine("global::JsonSlicer.JsonPrimitiveWriter.Instance.Write(Token.BeginObject, pipeWriter);");
             sb.AppendLine("global::JsonSlicer.JsonPrimitiveWriter.Instance.Write(Token.NewLine, pipeWriter);");
 
-            var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(p => !p.IsSpecialName).ToArray();
+            var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(p => !p.IsSpecialName)
+                .Where(p => p.GetIndexParameters().Length == 0)
+                
+                .ToArray();
             if (properties.Length != 0)
             {
                 WriteProperty(0);

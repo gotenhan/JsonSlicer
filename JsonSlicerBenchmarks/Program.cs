@@ -1,4 +1,5 @@
 ﻿using System;
+using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Running;
 
 namespace JsonSlicerBenchmarks
@@ -7,7 +8,7 @@ namespace JsonSlicerBenchmarks
     {
         static void Main(string[] args)
         {
-            BenchmarkRunner.Run<Benchmarks>();
+            BenchmarkRunner.Run<Benchmarks>(ManualConfig.Create(DefaultConfig.Instance).KeepBenchmarkFiles(true));
         }
     }
 }

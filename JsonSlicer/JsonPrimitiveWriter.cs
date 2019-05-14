@@ -27,8 +27,6 @@ namespace JsonSlicer
     {
         public static JsonPrimitiveWriter Instance = new JsonPrimitiveWriter();
         
-        private static readonly ConcurrentDictionary<Type, IJsonWriter> Serializers =
-            new ConcurrentDictionary<Type, IJsonWriter>();
         private static readonly ThreadLocal<Encoder> UTF8Enc =
             new ThreadLocal<Encoder>(() => Encoding.UTF8.GetEncoder());
 

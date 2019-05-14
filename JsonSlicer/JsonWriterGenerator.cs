@@ -27,6 +27,7 @@ namespace JsonSlicer
 
         public static IJsonWriter<T> Generate<T>()
         {
+            // todo: race condition - might try to generate same assembly twice
             var (writer, assemblyBytes) = Generators.GetOrAdd(typeof(T), _ => GenerateImpl<T>());
             return writer as IJsonWriter<T>;
         }
@@ -37,7 +38,7 @@ namespace JsonSlicer
             var serializer = serializerTemplate.Generate();
             var cSharpParseOptions =
                 new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.Parse, SourceCodeKind.Regular);
-#if DEBUG
+#if GENERATE_DLL
             var serializerName = serializerTemplate.SerializerName;
             var csPath = Path.GetFullPath(serializerName + ".cs");
             File.WriteAllText(csPath, serializer.Text, Encoding.UTF8);
@@ -70,9 +71,10 @@ namespace JsonSlicer
 
             Assembly assembly = null;
             byte[] assemblyBytes = null;
-#if DEBUG
+#if GENERATE_DLL
             var dllPath = Path.GetFullPath(serializerName + ".dll");
             var pdbPath = Path.GetFullPath(serializerName + ".pdb");
+            Console.WriteLine($"Generating dll and saving to {dllPath}");
             File.Delete(dllPath);
             File.Delete(pdbPath);
             var er = compilation.Emit(dllPath, pdbPath);
@@ -93,18 +95,30 @@ namespace JsonSlicer
                                 .Concat(new[] {"========="})
                                 .Concat(sourceWithNumberedLines)));
                 }
-#if !DEBUG
+#if !GENERATE_DLL
                 else
                 { 
                     ms.Seek(0, SeekOrigin.Begin);
                     assemblyBytes = ms.ToArray();
                     assembly = System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromStream(ms);
+
                 }
             }
 #else
             assembly = System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromAssemblyPath(dllPath);
             assemblyBytes = File.ReadAllBytes(dllPath);
+            Console.WriteLine($"Generation finished");
 #endif
+            foreach (var type in assembly.GetTypes())
+            {
+                foreach (var method in type.GetMethods(BindingFlags.DeclaredOnly |
+                                                       BindingFlags.NonPublic |
+                                                       BindingFlags.Public | BindingFlags.Instance |
+                                                       BindingFlags.Static))
+                {
+                    System.Runtime.CompilerServices.RuntimeHelpers.PrepareMethod(method.MethodHandle);
+                }
+            }
 
             var writer = (IJsonWriter<T>) Activator.CreateInstance(assembly.DefinedTypes.First());
             return (writer, assemblyBytes);

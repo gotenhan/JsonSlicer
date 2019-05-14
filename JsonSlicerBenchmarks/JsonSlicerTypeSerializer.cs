@@ -6,7 +6,7 @@ using JsonSlicer;
 
 namespace JsonSlicerBenchmarks
 {
-    public class JsonSlicerSerializer : IJSerializer
+    public class JsonSlicerTypeSerializer : IJSerializer
     {
         public byte[] Serialize(Type t, object o)
         {
@@ -38,9 +38,12 @@ namespace JsonSlicerBenchmarks
 
             var pipe = new Pipe();
             long writingElapsed = 0;
-            Write(pipe).GetAwaiter().GetResult();
 
-            return Read(pipe).GetAwaiter().GetResult();
+            var readTask = Read(pipe);
+            var writeTask = Write(pipe);
+
+            writeTask.GetAwaiter().GetResult();
+            return readTask.GetAwaiter().GetResult();
         }
 
         public override string ToString()

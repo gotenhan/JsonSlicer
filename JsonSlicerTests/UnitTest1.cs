@@ -10,6 +10,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using JsonSlicer;
 using JsonSlicerBenchmarks.Models;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using NUnit.Framework;
 using NUnit.Framework.Internal;
 
@@ -52,7 +53,7 @@ namespace JsonSlicerTests
 
 
             var actual = json.ToString();
-            Assert.AreEqual(ExpectedTestObjectJson, actual);
+            Assert.AreEqual(ExpectedTestObjectJsonWithNoLeadingSpaces, actual);
         }
 
         [Test]
@@ -241,7 +242,6 @@ namespace JsonSlicerTests
             public Nested NullNested { get; set; }
 
             public ArrayList ArrayList { get; set; }
-
         }
 
         public class Nested
