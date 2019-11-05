@@ -68,6 +68,24 @@ namespace JsonSlicerTests
         }
 
         [Test]
+        public async Task ProfileGenerated()
+        {
+            var pipe = new Pipe();
+            var to = GetTestObject(false);
+            var writer = JsonWriterGenerator.Generate(to.GetType());
+            var readTask = Read(pipe);
+            for (int i = 0; i < 10000; i++)
+            {
+                await writer.Write(to, pipe.Writer).ConfigureAwait(false);
+                var fr = await pipe.Writer.FlushAsync().ConfigureAwait(false);
+            }
+            pipe.Writer.Complete();
+
+            var h = await readTask.ConfigureAwait(false);
+            Assert.Greater(h.ToString().Length, 1);
+        }
+
+        [Test]
         public async Task SerializeComplexObjectHierarchy ()
         {
             var testObj = GetTestObject();

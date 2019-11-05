@@ -46,6 +46,11 @@ namespace JsonSlicer
             }
         }
 
+        public static void Register<T>()
+        {
+            var serializer = Serializers.GetOrAdd(typeof(T), _ => Build<T>());
+        }
+
         public static TypeSerializer Build<T>()
         {
             var properties = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance);

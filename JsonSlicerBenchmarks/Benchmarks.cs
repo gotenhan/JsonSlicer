@@ -15,7 +15,7 @@ using JsonSlicerBenchmarks.Models;
 
 namespace JsonSlicerBenchmarks
 {
-    //[EtwProfiler(false)]
+    [EtwProfiler(false)]
     public class Benchmarks
     {
         [ParamsSource(nameof(Serializers))]
@@ -27,13 +27,22 @@ namespace JsonSlicerBenchmarks
         [GlobalSetup]
         public void Setup()
         {
-            //var nested = JsonWriterGenerator.Generate<Nested>();
-            //var simple = JsonWriterGenerator.Generate<Simple>();
-            //Console.WriteLine($"{nested} {simple}");
+            var nested = JsonWriterGenerator.Generate<Nested>();
+            var simple = JsonWriterGenerator.Generate<Simple>();
+            var arrInt = JsonWriterGenerator.Generate<Arrays<int>>();
+            var arrString = JsonWriterGenerator.Generate<Arrays<string>>();
+            var arrSimple = JsonWriterGenerator.Generate<Arrays<Simple>>();
+            var arrNested = JsonWriterGenerator.Generate<Arrays<Nested>>();
+            TypeSerializer.Register<Nested>();
+            TypeSerializer.Register<Simple>();
+            TypeSerializer.Register<Arrays<int>>();
+            TypeSerializer.Register<Arrays<string>>();
+            TypeSerializer.Register<Arrays<Simple>>();
+            TypeSerializer.Register<Arrays<Nested>>();
+            Console.WriteLine($"{nested} {simple} {arrInt} {arrSimple} {arrString} {arrNested}");
 
         }
         [Benchmark]
-        [ArgumentsSource(nameof(Serializers))]
         public byte[] Serialize()
         {
             var s = (IJSerializer)Serializer;

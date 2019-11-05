@@ -5,9 +5,9 @@ using System.Text;
 
 namespace JsonSlicer
 {
-        public struct Token
+        public readonly struct Token
         {
-            public byte[] Value;
+            public readonly byte[] Value;
 
             public Token(byte value)
             {

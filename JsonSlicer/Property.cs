@@ -2,9 +2,9 @@
 
 namespace JsonSlicer
 {
-        public struct Property
+        public readonly struct Property
         {
-            public Token QuotedPropertyNameWithSeparator;
+            public readonly Token QuotedPropertyNameWithSeparator;
 
             public Property(string name)
             {

@@ -37,7 +37,6 @@ namespace JsonSlicerBenchmarks
             }
 
             var pipe = new Pipe();
-            long writingElapsed = 0;
 
             var readTask = Read(pipe);
             var writeTask = Write(pipe);
